@@ -238,12 +238,13 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
 
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
-    val A = UInt(8.W)
-    val C = UInt(15.W)
-    val E = UInt(9.W)
+    val A = UInt(32.W)
+    val C = UInt(32.W)
+    val E = UInt(32.W)
     val Avalid = Bool()
     val Cvalid = Bool()
     val Evalid = Bool()
+    val isACE = UInt(1.W)
 }
 
 // Random ACEToken Generator
@@ -252,12 +253,20 @@ class ACEInputGenerator extends Module {
         val seed = Input(UInt(32.W))
         val out = Output(new ACEToken)
     })
-    io.out.A := LFSR(32)
-    io.out.C := LFSR(32) ^ io.seed
-    io.out.E := LFSR(16) + io.seed * io.seed
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 3.U
+
+//    io.out.A := LFSR(32)
+//    io.out.C := LFSR(32) ^ io.seed
+//    io.out.E := LFSR(16) + io.seed * io.seed
     io.out.Avalid := LFSR(16) & 1.U
     io.out.Cvalid := LFSR(16) & 1.U
     io.out.Evalid := LFSR(16) & 1.U
+
+    io.out.A := counter
+    io.out.C := counter + 1.U
+    io.out.E := counter + 2.U
+    io.out.isACE := 1.U
 }
 
 // Pack ACEToken into 512 bits
@@ -278,14 +287,20 @@ class ACETokenTestModule extends Module {
     })
     val random_ACE_bundle_generator = Module(new ACEInputGenerator)
     val network_token_generator = Module(new ACETokenGenerator)
-    
+   
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 1.U
+
     random_ACE_bundle_generator.io.seed := io.seed
     network_token_generator.io.in := random_ACE_bundle_generator.io.out
     io.out := network_token_generator.io.out
 
     val probeACE = random_ACE_bundle_generator.io.out
-    printf(p"The bundle input = $probeACE")
-    printf(p"The output to the PCIE = ${Binary(io.out)}")
+
+    when (counter <= 100.U) {
+        printf(p"The bundle input = $probeACE \n")
+        printf(p"The output to the PCIE = ${Hexadecimal(io.out)} \n")
+    }
 }
 
 class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSignalReferences {
@@ -311,13 +326,11 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSigna
   def dutReset = { require(false, "dutReset should not be used in Firesim"); false.B }
   def success = { require(false, "success should not be used in Firesim"); false.B }
   
-
-  // val testACEsendermodule = Module(new ACETokenTestModule) 
   val testACEsendermodule = withClockAndReset(buildtopClock, buildtopReset) {
     Module(new ACETokenTestModule)
   }
-
-//  // Instantiate multiple instances of the DUT to implement supernode
+  testACEsendermodule.io.seed := 1.U
+  // Instantiate multiple instances of the DUT to implement supernode
 //  for (i <- 0 until p(NumNodes)) {
 //    // It's not a RC bump without some hacks...
 //    // Copy the AsyncClockGroupsKey to generate a fresh node on each
@@ -328,14 +341,12 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSigna
 //      case AsyncClockGroupsKey => p(AsyncClockGroupsKey).copy
 //    })))
 //    val module = Module(lazyModule.module)
-//
+
 //    lazyModule match { case d: HasIOBinders =>
 //      ApplyHarnessBinders(this, d.lazySystem, d.portMap)
 //    }
 //    NodeIdx.increment()
 //  }
 
-  buildtopClock := p(ClockBridgeInstantiatorKey).requestClock("buildtop_reference_clock", getRefClockFreq * (1000 * 1000))
-
-  p(ClockBridgeInstantiatorKey).instantiateFireSimClockBridge
+  buildtopClock := RationalClockBridge().io.clocks.head
 }
