@@ -15,17 +15,20 @@ import icenet.{NICIOvonly, RateLimiterSettings}
 import icenet.IceNIC._
 import junctions.{NastiIO, NastiKey}
 
-//object TokenQueueConsts {
-//  val TOKENS_PER_BIG_TOKEN = 7
-//  val BIG_TOKEN_WIDTH = (TOKENS_PER_BIG_TOKEN + 1) * 64
-//  val TOKEN_QUEUE_DEPTH = 6144
-//}
-//import TokenQueueConsts._
+object TokenQueueConsts {
+  val TOKENS_PER_BIG_TOKEN = 7
+  val BIG_TOKEN_WIDTH = (TOKENS_PER_BIG_TOKEN + 1) * 64
+  val TOKEN_QUEUE_DEPTH = 6144
+}
+import TokenQueueConsts._
 
 case object LoopbackNIC extends Field[Boolean](false)
 
 
 // Xingyu
+import chisel3.util._
+import chisel3.util.random._
+import freechips.rocketchip.tilelink._
 // Xingyu: Define special IO
 // This is the output side
 class ACEBundleIO extends Bundle {
@@ -77,19 +80,19 @@ class ACETokenGenerator extends Module {
     require(io.in.asUInt.getWidth <= 512)
 }
 
-class ACEBundleDMATokenGenerator extens Module {
+class ACEBundleDMATokenGenerator extends Module {
     val io = IO(new Bundle{
         val ACEio = Flipped(new ACEBundleIO)
         val out = Decoupled(UInt(512.W))
     })
     val outputgenerator = Module(new ACETokenGenerator)
-    outputgenerator.io.A := io.ACEio.A.bits
-    outputgenerator.io.C := io.ACEio.C.bits
-    outputgenerator.io.E := io.ACEio.E.bits
-    outputgenerator.io.Avalid := io.ACEio.A.valid
-    outputgenerator.io.Cvalid := io.ACEio.C.valid
-    outputgenerator.io.Evalid := io.ACEio.E.valid
-    outputgenerator.io.isACE := 1.U
+    outputgenerator.io.in.A := io.ACEio.A.bits
+    outputgenerator.io.in.C := io.ACEio.C.bits
+    outputgenerator.io.in.E := io.ACEio.E.bits
+    outputgenerator.io.in.Avalid := io.ACEio.A.valid
+    outputgenerator.io.in.Cvalid := io.ACEio.C.valid
+    outputgenerator.io.in.Evalid := io.ACEio.E.valid
+    outputgenerator.io.in.isACE := 1.U
 
     io.out.bits := outputgenerator.io.out
     io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid || io.ACEio.E.valid
@@ -268,19 +271,19 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     // Xingyu: Start
     val ACE_to_NIC_generator = Module(new ACEBundleDMATokenGenerator)
 
-    ACE_to_NIC_generator.io.ACEio <> hPort.nic
+    ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
     outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
 
     val tokensToEnqueue = RegInit(0.U(64.W))
     when (ACE_to_NIC_generator.io.out.valid) {
-        tokensToEnqueue := tokensToEnqueue + 1
+        tokensToEnqueue := tokensToEnqueue + 1.U
     }
     val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val Aw = A.getWidth
-    val Cw = C.getWidth
-    val Ew = E.getWidth
+    val Aw = A.getWidth.asUInt
+    val Cw = C.getWidth.asUInt
+    val Ew = E.getWidth.asUInt
     
     genROReg(tokensToEnqueue, "number_of_tokens")
     genROReg(Aw, "Awidth")
@@ -290,10 +293,10 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     // Xingyu: End
 
     // DMA mixin parameters
-//    lazy val fromHostCPUQueueDepth = TOKEN_QUEUE_DEPTH
-//    lazy val toHostCPUQueueDepth   = TOKEN_QUEUE_DEPTH
+    lazy val fromHostCPUQueueDepth = TOKEN_QUEUE_DEPTH
+    lazy val toHostCPUQueueDepth   = TOKEN_QUEUE_DEPTH
     // Biancolin: Need to look into this
-//    lazy val dmaSize = BigInt((BIG_TOKEN_WIDTH / 8) * TOKEN_QUEUE_DEPTH)
+    lazy val dmaSize = BigInt((BIG_TOKEN_WIDTH / 8) * TOKEN_QUEUE_DEPTH)
 
 //    val htnt_queue = Module(new Queue(new HostToNICToken, 10))
 //    val ntht_queue = Module(new Queue(new NICToHostToken, 10))
@@ -302,8 +305,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 //    val NICtokenToBig = Module(new NICTokenToBigTokenAdapter)
 
 //    val target = hPort.hBits.nic
-//    val tFireHelper = DecoupledHelper(hPort.toHost.hValid,
-                                      hPort.fromHost.hReady)
+//    val tFireHelper = DecoupledHelper(hPort.toHost.hValid, hPort.fromHost.hReady)
 //    val tFire = tFireHelper.fire
 
 //    if (p(LoopbackNIC)) {
