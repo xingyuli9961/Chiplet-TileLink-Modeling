@@ -20,9 +20,14 @@ import chipyard.harness._
 import chipyard.iobinders._
 import chipyard.clocking._
 
-// Xingyu: add support in utils
+// Xingyu: new imports for project
 import chisel3.util._
 import chisel3.util.random._
+import freechips.rocketchip.tilelink._
+// import freechips.rocketchip.tilelink.Parameters._
+// import freechips.rocketchip.tilelink.Bundles._
+// Xingyu: import ends
+
 
 // Determines the number of times to instantiate the DUT in the harness.
 // Subsumes legacy supernode support
@@ -236,11 +241,17 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
   }
 })
 
+
+// Xingyu
+// Xingyu: necessary initialization
+// val tlparam = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
-    val A = UInt(32.W)
-    val C = UInt(32.W)
-    val E = UInt(32.W)
+    // val A = UInt(32.W)
+    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val Avalid = Bool()
     val Cvalid = Bool()
     val Evalid = Bool()
@@ -256,16 +267,14 @@ class ACEInputGenerator extends Module {
     val counter = RegInit(UInt(32.W), 0.U)
     counter := counter + 3.U
 
-//    io.out.A := LFSR(32)
-//    io.out.C := LFSR(32) ^ io.seed
-//    io.out.E := LFSR(16) + io.seed * io.seed
     io.out.Avalid := LFSR(16) & 1.U
     io.out.Cvalid := LFSR(16) & 1.U
     io.out.Evalid := LFSR(16) & 1.U
 
-    io.out.A := counter
-    io.out.C := counter + 1.U
-    io.out.E := counter + 2.U
+
+    io.out.A := counter.asTypeOf(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    io.out.C := (counter + 1.U).asTypeOf(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    io.out.E := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
     io.out.isACE := 1.U
 }
 
@@ -295,8 +304,17 @@ class ACETokenTestModule extends Module {
     network_token_generator.io.in := random_ACE_bundle_generator.io.out
     io.out := network_token_generator.io.out
 
-    val probeACE = random_ACE_bundle_generator.io.out
 
+    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val Aw = A.getWidth
+    val Cw = C.getWidth
+    val Ew = E.getWidth
+    val probeACE = random_ACE_bundle_generator.io.out
+    when (counter === 0.U) {
+	printf(p"The A, C, E channel with are $Aw, $Cw, $Ew")
+    }
     when (counter <= 100.U) {
         printf(p"The bundle input = $probeACE \n")
         printf(p"The output to the PCIE = ${Hexadecimal(io.out)} \n")
