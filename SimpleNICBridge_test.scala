@@ -140,12 +140,9 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     when (ACE_to_NIC_generator.io.out.valid) {
         tokensToEnqueue := tokensToEnqueue + 1.U
     }
-    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val Aw = A.getWidth.asUInt
-    val Cw = C.getWidth.asUInt
-    val Ew = E.getWidth.asUInt
+    val Aw = hPort.hBits.nic.A.bits.getWidth.asUInt
+    val Cw = hPort.hBits.nic.C.bits.getWidth.asUInt
+    val Ew = hPort.hBits.nic.E.bits.getWidth.asUInt
     
     genROReg(tokensToEnqueue, "number_of_tokens")
     genROReg(Aw, "Awidth")
