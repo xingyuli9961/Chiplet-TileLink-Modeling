@@ -129,9 +129,11 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     val hPort = IO(HostPort(new NICTargetIO))
     
     // Xingyu: Start
+    val ACEBundlesgenerator = Module(new ACEIOInputGenerator)
     val ACE_to_NIC_generator = Module(new ACEBundleDMATokenGenerator)
 
-    ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
+    // ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
+    ACE_to_NIC_generator.io.ACEio <> ACEBundlesgenerator.io
     outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
 
     val tokensToEnqueue = RegInit(0.U(64.W))
