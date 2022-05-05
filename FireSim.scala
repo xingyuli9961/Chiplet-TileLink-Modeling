@@ -248,7 +248,6 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
 
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
-    // val A = UInt(32.W)
     val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
