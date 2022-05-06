@@ -24,8 +24,7 @@ import chipyard.clocking._
 import chisel3.util._
 import chisel3.util.random._
 import freechips.rocketchip.tilelink._
-// import freechips.rocketchip.tilelink.Parameters._
-// import freechips.rocketchip.tilelink.Bundles._
+import firesim.bridges._
 // Xingyu: import ends
 
 
@@ -248,6 +247,7 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
 
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
+    // val A = UInt(32.W)
     val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
@@ -311,13 +311,13 @@ class ACETokenTestModule extends Module {
     val Cw = C.getWidth
     val Ew = E.getWidth
     val probeACE = random_ACE_bundle_generator.io.out
-    when (counter === 0.U) {
-	printf(p"The A, C, E channel with are $Aw, $Cw, $Ew")
-    }
-    when (counter <= 100.U) {
-        printf(p"The bundle input = $probeACE \n")
-        printf(p"The output to the PCIE = ${Hexadecimal(io.out)} \n")
-    }
+//    when (counter === 0.U) {
+//	printf(p"The A, C, E channel with are $Aw, $Cw, $Ew")
+//    }
+//    when (counter <= 100.U) {
+//        printf(p"The bundle input = $probeACE \n")
+//        printf(p"The output to the PCIE = ${Hexadecimal(io.out)} \n")
+//    }
 }
 
 class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSignalReferences {
@@ -344,9 +344,11 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSigna
   def success = { require(false, "success should not be used in Firesim"); false.B }
   
   val testACEsendermodule = withClockAndReset(buildtopClock, buildtopReset) {
-    Module(new ACETokenTestModule)
+    Module(new ACEIOInputGenerator)
   }
-  testACEsendermodule.io.seed := 1.U
+
+  val ACEBridge = NICBridge(buildtopClock, testACEsendermodule.io)
+
   // Instantiate multiple instances of the DUT to implement supernode
 //  for (i <- 0 until p(NumNodes)) {
 //    // It's not a RC bump without some hacks...
