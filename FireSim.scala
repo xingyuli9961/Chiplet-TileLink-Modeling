@@ -241,85 +241,6 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
 })
 
 
-// Xingyu
-// Xingyu: necessary initialization
-// val tlparam = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
-
-// The Fake bundle just for testing
-class ACEToken extends Bundle{
-    // val A = UInt(32.W)
-    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val Avalid = Bool()
-    val Cvalid = Bool()
-    val Evalid = Bool()
-    val isACE = UInt(1.W)
-}
-
-// Random ACEToken Generator
-class ACEInputGenerator extends Module {
-    val io = IO(new Bundle {
-        val seed = Input(UInt(32.W))
-        val out = Output(new ACEToken)
-    })
-    val counter = RegInit(UInt(32.W), 0.U)
-    counter := counter + 3.U
-
-    io.out.Avalid := LFSR(16) & 1.U
-    io.out.Cvalid := LFSR(16) & 1.U
-    io.out.Evalid := LFSR(16) & 1.U
-
-
-    io.out.A := counter.asTypeOf(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-    io.out.C := (counter + 1.U).asTypeOf(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-    io.out.E := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-    io.out.isACE := 1.U
-}
-
-// Pack ACEToken into 512 bits
-class ACETokenGenerator extends Module {
-    val io = IO(new Bundle{
-        val in = Input(new ACEToken)
-        val out = Output(UInt(512.W))
-    })
-    io.out := io.in.asUInt
-    require(io.in.asUInt.getWidth <= 512)
-}
-
-// Test Module
-class ACETokenTestModule extends Module {
-    val io = IO(new Bundle {
-        val seed = Input(UInt(32.W))
-        val out = Output(UInt(512.W))
-    })
-    val random_ACE_bundle_generator = Module(new ACEInputGenerator)
-    val network_token_generator = Module(new ACETokenGenerator)
-   
-    val counter = RegInit(UInt(32.W), 0.U)
-    counter := counter + 1.U
-
-    random_ACE_bundle_generator.io.seed := io.seed
-    network_token_generator.io.in := random_ACE_bundle_generator.io.out
-    io.out := network_token_generator.io.out
-
-
-    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val Aw = A.getWidth
-    val Cw = C.getWidth
-    val Ew = E.getWidth
-    val probeACE = random_ACE_bundle_generator.io.out
-//    when (counter === 0.U) {
-//	printf(p"The A, C, E channel with are $Aw, $Cw, $Ew")
-//    }
-//    when (counter <= 100.U) {
-//        printf(p"The bundle input = $probeACE \n")
-//        printf(p"The output to the PCIE = ${Hexadecimal(io.out)} \n")
-//    }
-}
-
 class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSignalReferences {
   freechips.rocketchip.util.property.cover.setPropLib(new midas.passes.FireSimPropertyLibrary())
 
@@ -342,30 +263,17 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSigna
 
   def dutReset = { require(false, "dutReset should not be used in Firesim"); false.B }
   def success = { require(false, "success should not be used in Firesim"); false.B }
-  
+ 
+ 
+  // Xingyu: Start
+  // Instantiate the random fuzzer of ACE I/O inputs
   val testACEsendermodule = withClockAndReset(buildtopClock, buildtopReset) {
     Module(new ACEIOInputGenerator)
   }
-
+  // Instantiate the bridge
   val ACEBridge = NICBridge(buildtopClock, testACEsendermodule.io)
+  // Xingyu: End
 
-  // Instantiate multiple instances of the DUT to implement supernode
-//  for (i <- 0 until p(NumNodes)) {
-//    // It's not a RC bump without some hacks...
-//    // Copy the AsyncClockGroupsKey to generate a fresh node on each
-//    // instantiation of the dut, otherwise the initial instance will be
-//    // reused across each node
-//    import freechips.rocketchip.subsystem.AsyncClockGroupsKey
-//    val lazyModule = LazyModule(p(BuildTop)(p.alterPartial({
-//      case AsyncClockGroupsKey => p(AsyncClockGroupsKey).copy
-//    })))
-//    val module = Module(lazyModule.module)
-
-//    lazyModule match { case d: HasIOBinders =>
-//      ApplyHarnessBinders(this, d.lazySystem, d.portMap)
-//    }
-//    NodeIdx.increment()
-//  }
 
   buildtopClock := RationalClockBridge().io.clocks.head
 }
