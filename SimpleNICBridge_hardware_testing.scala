@@ -190,29 +190,29 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     }
 
 
-    genROReg(tokensToEnqueue, "number_of_tokens")
-    genROReg(Aw, "Awidth")
-    genROReg(Cw, "Cwidth")
-    genROReg(Ew, "Ewidth")
-    genCRFile()
+//    genROReg(tokensToEnqueue, "number_of_tokens")
+//    genROReg(Aw, "Awidth")
+//    genROReg(Cw, "Cwidth")
+//    genROReg(Ew, "Ewidth")
+//    genCRFile()
     // Xingyu: End
 
     // Xingyu: For hardware compiling and testing
-//    val macAddrRegUpper = Reg(UInt(32.W))
-//    val macAddrRegLower = Reg(UInt(32.W))
-//    val rlimitSettings = Reg(UInt(32.W))
-//    val pauseThreshold = Reg(UInt(32.W))
-//    val pauseTimes = Reg(UInt(32.W))
-//    val tFire = RegInit(UInt(1.W), 0.U)
+    val macAddrRegUpper = Reg(UInt(32.W))
+    val macAddrRegLower = Reg(UInt(32.W))
+    val rlimitSettings = Reg(UInt(32.W))
+    val pauseThreshold = Reg(UInt(32.W))
+    val pauseTimes = Reg(UInt(32.W))
+    val tFire = RegInit(UInt(1.W), 0.U)
 
-//    attach(macAddrRegUpper, "macaddr_upper", WriteOnly)
-//    attach(macAddrRegLower, "macaddr_lower", WriteOnly)
-//    attach(rlimitSettings, "rlimit_settings", WriteOnly)
-//    attach(pauseThreshold, "pause_threshold", WriteOnly)
-//    attach(pauseTimes, "pause_times", WriteOnly)
-//    genROReg(!tFire, "done")
+    attach(macAddrRegUpper, "macaddr_upper", WriteOnly)
+    attach(macAddrRegLower, "macaddr_lower", WriteOnly)
+    attach(rlimitSettings, "rlimit_settings", WriteOnly)
+    attach(pauseThreshold, "pause_threshold", WriteOnly)
+    attach(pauseTimes, "pause_times", WriteOnly)
+    genROReg(!tFire, "done")
     // Xingyu: End
-//    genCRFile()
+    genCRFile()
 
   }
 }
