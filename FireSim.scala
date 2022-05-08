@@ -241,6 +241,15 @@ class WithFireSimHarnessClockBinder extends OverrideHarnessBinder({
 })
 
 
+// Xingyu: Start 
+// Doesn't work
+//class TesterWithBridge(implicit val p: Parameters) extends Module {
+//  val io = IO(Input(Clock()))
+//  val testACEsendermodule = Module(new ACEIOInputGenerator)
+//  val ACEBridge = NICBridge(io, testACEsendermodule.io) 
+//}
+// Xingyu: End
+
 class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSignalReferences {
   freechips.rocketchip.util.property.cover.setPropLib(new midas.passes.FireSimPropertyLibrary())
 
@@ -267,11 +276,25 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessSigna
  
   // Xingyu: Start
   // Instantiate the random fuzzer of ACE I/O inputs
-  val testACEsendermodule = withClockAndReset(buildtopClock, buildtopReset) {
-    Module(new ACEIOInputGenerator)
+//  val testACEsendermodule = withClockAndReset(buildtopClock, buildtopReset) {
+//    Module(new ACEIOInputGenerator)
+//  }
+
+  val AplaceHolderReg = withClockAndReset(buildtopClock, buildtopReset) {
+    RegInit(UInt(32.W), 0.U)
   }
+  val ACEBridge = NICBridge(buildtopClock, AplaceHolderReg)
+
+  // testACEsendermodule.io.A.ready := true.B
+  // testACEsendermodule.io.C.ready := true.B
+
   // Instantiate the bridge
-  val ACEBridge = NICBridge(buildtopClock, testACEsendermodule.io)
+  // val ACEBridge = NICBridge(buildtopClock, testACEsendermodule.io.asTypeOf(new ACEBundleIO))
+  // val ACEBridge = NICBridge(buildtopClock, testACEsendermodule.io)
+  // val testmodule = withClockAndReset(buildtopClock, buildtopReset) {
+  //  Module(new TesterWithBridge)
+  // }
+  // testmodule.io := buildtopClock
   // Xingyu: End
 
 

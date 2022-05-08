@@ -34,23 +34,23 @@ import freechips.rocketchip.tilelink._
 class ACEBundleIO extends Bundle {
   val A = Decoupled(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
   val C = Decoupled(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-//  val E = Decoupled(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+  val E = Decoupled(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
 }
 
 class NICTargetIO extends Bundle {
   val clock = Input(Clock())
-  val nic = Flipped(new ACEBundleIO)
+//  val nic = Flipped(new ACEBundleIO)
+  val nic = Input(UInt(32.W))
 }
 
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
-    // val A = UInt(32.W)
     val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-//    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
     val Avalid = Bool()
     val Cvalid = Bool()
-//    val Evalid = Bool()
+    val Evalid = Bool()
     val isACE = UInt(1.W)
 }
 
@@ -64,10 +64,18 @@ class ACEIOInputGenerator extends Module {
 
     io.A.bits := counter.asTypeOf(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))) 
     io.C.bits := (counter + 1.U).asTypeOf(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
- //   io.E.bits := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-    io.A.valid := 1.U
-    io.C.valid := 1.U
-//    io.E.valid := LFSR(16) & 1.U
+    io.E.bits := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    io.A.valid := LFSR(16) & 1.U
+    io.C.valid := LFSR(16) >= 134.U
+    io.E.valid := LFSR(16) <= 44.U
+
+//    when (counter === 0.U) {
+//        printf(p"Simulation starts\n")
+//    }
+
+//    when (counter <= 100.U) {
+//        printf(p"The output at counter $counter = $io \n")
+//    }
 }
 
 // Pack ACEBundleIO into ACEToken into 512 bits
@@ -88,19 +96,19 @@ class ACEBundleDMATokenGenerator extends Module {
     val outputgenerator = Module(new ACETokenGenerator)
     outputgenerator.io.in.A := io.ACEio.A.bits
     outputgenerator.io.in.C := io.ACEio.C.bits
-//    outputgenerator.io.in.E := io.ACEio.E.bits.asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    outputgenerator.io.in.E := io.ACEio.E.bits.asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
     outputgenerator.io.in.Avalid := io.ACEio.A.valid
     outputgenerator.io.in.Cvalid := io.ACEio.C.valid
-//    outputgenerator.io.in.Evalid := io.ACEio.E.valid
+    outputgenerator.io.in.Evalid := io.ACEio.E.valid
     outputgenerator.io.in.isACE := 1.U
 
     io.out.bits := outputgenerator.io.out
-//    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid || io.ACEio.E.valid
-    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid
+    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid || io.ACEio.E.valid
+//    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid
 
     io.ACEio.A.ready := io.out.ready
     io.ACEio.C.ready := io.out.ready
-//    io.ACEio.E.ready := io.out.ready
+    io.ACEio.E.ready := io.out.ready
 }
 
 // Xinyu: End
@@ -116,13 +124,22 @@ class NICBridge(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[
 
 
 object NICBridge {
-  def apply(clock: Clock, nicIO: ACEBundleIO)(implicit p: Parameters): NICBridge = {
+  def apply(clock: Clock, nicIO: UInt)(implicit p: Parameters): NICBridge = {
     val ep = Module(new NICBridge)
     ep.io.nic <> nicIO
     ep.io.clock := clock
     ep
   }
 }
+
+//object NICBridge {
+//  def apply(clock: Clock, nicIO: ACEBundleIO)(implicit p: Parameters): NICBridge = {
+//    val ep = Module(new NICBridge)
+//    ep.io.nic <> nicIO
+//    ep.io.clock := clock
+//    ep
+//  }
+//}
 
 class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPortIO[NICTargetIO]]()(p) {
   lazy val module = new BridgeModuleImp(this) with BidirectionalDMA {
@@ -138,7 +155,12 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     // Xingyu: Start
     val ACE_to_NIC_generator = Module(new ACEBundleDMATokenGenerator)
 
-    ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
+    // A hacky way to do
+    val BundleGenerator = Module(new ACEIOInputGenerator)
+    ACE_to_NIC_generator.io.ACEio <> BundleGenerator.io
+
+    // ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
+
     outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
 
     incomingPCISdat.io.deq.ready := false.B
@@ -151,17 +173,19 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     when (ACE_to_NIC_generator.io.out.valid) {
         tokensToEnqueue := tokensToEnqueue + 1.U
     }
-    val Aw = hPort.hBits.nic.A.bits.getWidth.asUInt
-    val Cw = hPort.hBits.nic.C.bits.getWidth.asUInt
-//    val Ew = hPort.hBits.nic.E.bits.getWidth.asUInt
+    val Aw = BundleGenerator.io.A.bits.getWidth.asUInt
+    val Cw = BundleGenerator.io.C.bits.getWidth.asUInt
+    val Ew = BundleGenerator.io.E.bits.getWidth.asUInt
     
     when (counter === 0.U) {
-        // printf(p"The A, C, E channel widths are $Aw, $Cw, $Ew")
-        printf(p"The A, C channel widths are $Aw, $Cw")
+        printf(p"The A, C, E channel widths are $Aw, $Cw, $Ew \n")
+//        printf(p"The A, C channel widths are $Aw, $Cw \n")
     }
     val probeACE = hPort.hBits.nic
+    val probeACE2 = BundleGenerator.io
     when (counter <= 100.U) {
         printf(p"The bundle input = $probeACE \n")
+        printf(p"The inside generated input is = $probeACE2 \n")
         printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
     }
 

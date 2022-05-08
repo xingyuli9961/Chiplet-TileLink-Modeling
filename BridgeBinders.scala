@@ -82,9 +82,9 @@ class WithSerialBridge extends OverrideHarnessBinder({
   }
 })
 
-// Xingyu: changed from NICIOvonly ACEBundleIO
+// Xingyu: changed from NICIOvonly ACEBundleIO UInt(32.W)
 class WithNICBridge extends OverrideHarnessBinder({
-  (system: CanHavePeripheryIceNIC, th: FireSim, ports: Seq[ClockedIO[ACEBundleIO]]) => {
+  (system: CanHavePeripheryIceNIC, th: FireSim, ports: Seq[ClockedIO[UInt]]) => {
     val p: Parameters = GetSystemParameters(system)
     ports.map { n => NICBridge(n.clock, n.bits)(p) }
     Nil
