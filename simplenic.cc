@@ -49,17 +49,21 @@ simplenic_t::simplenic_t(simif_t *sim, std::vector<std::string> &args,
         long dma_addr): bridge_driver_t(sim)
 {
     this->mmio_addrs = mmio_addrs;
-    this->direction = read(this->mmio_addrs->direction);
+    //this->direction = read(this->mmio_addrs->direction);
+    printf("Linklatency is %d\n", this->LINKLATENCY);
+    this->LINKLATENCY = 6405;
     this->dma_addr = dma_addr;
-    
+    int shmemfd;
     for(int i = 0; i < 2; i++) {
-        string name "filler";
-        printf("opening shmem region\n%s\n", name);
-        shmemfd = shm_open(name, O_RDWR|O_CRAT, S_IRWXU);
+        std::string name = "filler";
+        printf("opening shmem region\n%s\n", name.c_str());
+        shmemfd = shm_open(name.c_str(), O_RDWR|O_CREAT, S_IRWXU);
         ftruncate(shmemfd, BUFBYTES+EXTRABYTES);
+        printf("Size of pcis_read_bufs: %d\n", BUFBYTES+EXTRABYTES);
         pcis_read_bufs[i] = (char *) mmap(NULL, BUFBYTES+EXTRABYTES, PROT_READ | PROT_WRITE, MAP_SHARED, shmemfd, 0);//remember to initialize in the write direction as well later
         //WILL NEED TO ADJUST BUFFERS DEPENDING ON DIRECTION AT SOME POINT
     }
+    printf("successful init\n");
 }
 
 simplenic_t::~simplenic_t() {
@@ -97,29 +101,31 @@ void simplenic_t::init() {
 
 void simplenic_t::tick() {
     struct timespec tstart, tend;
-
+    printf("im ticking\n");
+    printf("BUFWIDTH: %d\n", BUFWIDTH);
+    printf("BUFBYTES: %d\n", BUFBYTES);
     //#define DEBUG_NIC_PRINT
     while (true) { // break when we don't have 5k tokens
         uint32_t tokens_this_round = 0;
-
-        uint32_t output_tokens_available = read(mmio_addrs->outgoing_count);
+        printf("current round: %d\n", currentround);
+        uint32_t output_tokens_available = read(mmio_addrs->number_of_tokens);
         //uint32_t input_token_capacity = SIMLATENCY_BT - read(mmio_addrs->incoming_count);
 
         // we will read/write the min of tokens available / token input capacity
         tokens_this_round = output_tokens_available;
 
         // read into read_buffer
-        //MAKE BUFFER OF SOME SIZE
-        ch
+        printf("tokens this round: %d\n", tokens_this_round);
         uint32_t token_bytes_obtained_from_fpga = 0;
         token_bytes_obtained_from_fpga = pull(
                 dma_addr,
                 pcis_read_bufs[currentround],
                 BUFWIDTH * tokens_this_round);
-
+        printf("token bytes from fpga: %d\n",token_bytes_obtained_from_fpga);
         pcis_read_bufs[currentround][BUFBYTES] = 1;
         for(int i = 0; i < BUFBYTES; i ++) {
-            printf("%d\n", pcis_read_bufs[currentround][]);
+            printf("printing out read buffer ");
+            printf("%d\n", pcis_read_bufs[currentround][i]);
 
         }  
         
