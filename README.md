@@ -14,17 +14,31 @@ firesim/sim/firesim-lib/src/main/scala/bridges/
 
 3. SimpleNICBridge.scala
 
+firesim/sim/firesim-lib/src/main/cc/bridges/
+
+4. simplenic.cc
+
+5. simplenic.h
+
+firesim/target-design/switch
+
+6. switch.cc
+
+7. flit.h
+
 firesim/deploy/
 
-4. config_runtime.ini
+8. config_runtime.ini
 
 /home/centos/firesim/deploy/workloads/
 
-5. linux-uniform.json
+9. linux-uniform.json
 
 /home/centos/firesim/deploy/workloads/linux-uniform/
 
-6. br-base-bin : remove the file and create an empty file
+10. br-base-bin : remove the file and create an empty file
+
+Note: this should be run on the branch: origin/manager-metasimulation-support
 
 
 Will some referenced old files later.
