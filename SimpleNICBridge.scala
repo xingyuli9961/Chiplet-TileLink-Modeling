@@ -57,17 +57,30 @@ class ACEToken extends Bundle{
 // Random ACEToken Generator
 class ACEIOInputGenerator extends Module {
     val io = IO(new ACEBundleIO)
-
+    
+    // A variable indicating each token is generated in how many cycles
+    val period = 10.U
+    val p_counter = RegInit(UInt(32.W), 0.U)
 
     val counter = RegInit(UInt(32.W), 0.U)
-    counter := counter + 3.U
+
+    when (p_counter < period - 1.U) {
+        counter := counter
+        p_counter := p_counter + 1.U
+        io.A.valid := false.B
+        io.C.valid := false.B
+        io.E.valid := false.B
+    } .otherwise {
+        counter := counter + 3.U
+        p_counter := 0.U
+        io.A.valid := true.B
+        io.C.valid := LFSR(16) >= 134.U
+        io.E.valid := (LFSR(16) & 1.U) === 1.U
+    }
 
     io.A.bits := counter.asTypeOf(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))) 
     io.C.bits := (counter + 1.U).asTypeOf(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
     io.E.bits := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-    io.A.valid := LFSR(16) & 1.U
-    io.C.valid := LFSR(16) >= 134.U
-    io.E.valid := LFSR(16) <= 44.U
 
 //    when (counter === 0.U) {
 //        printf(p"Simulation starts\n")
@@ -179,40 +192,40 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     
     when (counter === 0.U) {
         printf(p"The A, C, E channel widths are $Aw, $Cw, $Ew \n")
-//        printf(p"The A, C channel widths are $Aw, $Cw \n")
     }
-    val probeACE = hPort.hBits.nic
+    
     val probeACE2 = BundleGenerator.io
-    when (counter <= 100.U) {
-        printf(p"The bundle input = $probeACE \n")
+    when (counter <= 200.U && ACE_to_NIC_generator.io.out.valid) {
+        printf(p"This is counter $counter \n")
         printf(p"The inside generated input is = $probeACE2 \n")
         printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
     }
 
+    // Use this next line when do atual software driver tests
+    var hardware_testing = false;
+    // val hardware_testing = true; 
 
-    genROReg(tokensToEnqueue, "number_of_tokens")
-    genROReg(Aw, "Awidth")
-    genROReg(Cw, "Cwidth")
-    genROReg(Ew, "Ewidth")
+    if (hardware_testing) {
+        val macAddrRegUpper = Reg(UInt(32.W))
+        val macAddrRegLower = Reg(UInt(32.W))
+        val rlimitSettings = Reg(UInt(32.W))
+        val pauseThreshold = Reg(UInt(32.W))
+        val pauseTimes = Reg(UInt(32.W))
+        val tFire = RegInit(UInt(1.W), 0.U)
+        attach(macAddrRegUpper, "macaddr_upper", WriteOnly)
+        attach(macAddrRegLower, "macaddr_lower", WriteOnly)
+        attach(rlimitSettings, "rlimit_settings", WriteOnly)
+        attach(pauseThreshold, "pause_threshold", WriteOnly)
+        attach(pauseTimes, "pause_times", WriteOnly)
+        genROReg(!tFire, "done")
+    } else {
+	genROReg(tokensToEnqueue, "number_of_tokens")
+	genROReg(Aw, "Awidth")
+	genROReg(Cw, "Cwidth")
+	genROReg(Ew, "Ewidth")
+    }
+
     genCRFile()
     // Xingyu: End
-
-    // Xingyu: For hardware compiling and testing
-//    val macAddrRegUpper = Reg(UInt(32.W))
-//    val macAddrRegLower = Reg(UInt(32.W))
-//    val rlimitSettings = Reg(UInt(32.W))
-//    val pauseThreshold = Reg(UInt(32.W))
-//    val pauseTimes = Reg(UInt(32.W))
-//    val tFire = RegInit(UInt(1.W), 0.U)
-
-//    attach(macAddrRegUpper, "macaddr_upper", WriteOnly)
-//    attach(macAddrRegLower, "macaddr_lower", WriteOnly)
-//    attach(rlimitSettings, "rlimit_settings", WriteOnly)
-//    attach(pauseThreshold, "pause_threshold", WriteOnly)
-//    attach(pauseTimes, "pause_times", WriteOnly)
-//    genROReg(!tFire, "done")
-    // Xingyu: End
-//    genCRFile()
-
   }
 }
