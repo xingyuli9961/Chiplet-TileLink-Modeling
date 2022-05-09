@@ -4,20 +4,27 @@ A simple TileLink protocol hardware NIC, C++ software driver, and a switch.
 
 Modified Files:
 
-firesim/target-design/chipyard/generators/firechip/src/main/scala
+firesim/target-design/chipyard/generators/firechip/src/main/scala/
 
-  FireSim.scala
+1. FireSim.scala
 
-  BridgeBinders.scala
+2. BridgeBinders.scala
 
-firesim/sim/firesim-lib/src/main/scala/bridges
+firesim/sim/firesim-lib/src/main/scala/bridges/
 
-  SimpleNICBridge.scala
+3. SimpleNICBridge.scala
 
-firesim/deploy
+firesim/deploy/
 
-  config_runtime.ini
+4. config_runtime.ini
 
+/home/centos/firesim/deploy/workloads/
+
+5. linux-uniform.json
+
+/home/centos/firesim/deploy/workloads/linux-uniform/
+
+6. br-base-bin : remove the file and create an empty file
 
 
 Will some referenced old files later.
