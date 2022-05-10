@@ -60,11 +60,12 @@ class ACEIOInputGenerator extends Module {
     
     // A variable indicating each token is generated in how many cycles
     val period = 10.U
+    val max_num_tokens = 29.U 
     val p_counter = RegInit(UInt(32.W), 0.U)
 
     val counter = RegInit(UInt(32.W), 0.U)
 
-    when (p_counter < period - 1.U) {
+    when (p_counter < period - 1.U || counter > max_num_tokens) {
         counter := counter
         p_counter := p_counter + 1.U
         io.A.valid := false.B
@@ -124,6 +125,44 @@ class ACEBundleDMATokenGenerator extends Module {
     io.ACEio.E.ready := io.out.ready
 }
 
+
+// Dis-assemble 512 bits into ACEToken
+class ACETokenDecoder extends Module {
+    val io = IO(new Bundle{
+        val in = Input(UInt(512.W))
+        val out = Output(new ACEToken)
+    })
+    io.out := io.in.asTypeOf(new ACEToken)
+}
+
+
+class ACETokentoBundlesDecoder extends Module {
+    val io = IO(new Bundle {
+	val in = Flipped(Decoupled(UInt(512.W)))
+        val ACEout = new ACEBundleIO
+    })
+    val PCIeparser = Module(new ACETokenDecoder)
+    PCIeparser.io.in := io.in.bits
+    io.in.ready := io.ACEout.A.ready && io.ACEout.C.ready && io.ACEout.E.ready
+    io.ACEout.A.bits := PCIeparser.io.out.A
+    io.ACEout.C.bits := PCIeparser.io.out.C
+    io.ACEout.E.bits := PCIeparser.io.out.E
+    io.ACEout.A.valid := PCIeparser.io.out.Avalid && io.in.valid
+    io.ACEout.C.valid := PCIeparser.io.out.Cvalid && io.in.valid
+    io.ACEout.E.valid := PCIeparser.io.out.Evalid && io.in.valid
+    // require(PCIeparser.io.out.isACE == true.B) 
+
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 1.U
+    when (counter === 0.U) {
+        printf(p"The decoder actually instantiated\n")
+    } 
+    when (counter === 5.U) {
+	printf(p"Just a print at $counter \n")
+    }
+}
+
+
 // Xinyu: End
 // Xingyu
 
@@ -176,7 +215,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
 
-    incomingPCISdat.io.deq.ready := false.B
+    // incomingPCISdat.io.deq.ready := false.B
     // bigtokenToNIC.io.pcie_in <> incomingPCISdat.io.deq
 
     val counter = RegInit(UInt(32.W), 0.U)
@@ -200,6 +239,27 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
         printf(p"The inside generated input is = $probeACE2 \n")
         printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
     }
+
+    // The decoder
+    val decoder = Module(new ACETokentoBundlesDecoder)
+    decoder.io.in <> incomingPCISdat.io.deq    
+
+    // Test decoder: self-loop for correctness
+    // decoder.io.in <> ACE_to_NIC_generator.io.out
+
+    decoder.io.ACEout.A.ready := true.B
+    decoder.io.ACEout.C.ready := true.B
+    decoder.io.ACEout.E.ready := true.B
+
+    val ACE_decode_out = decoder.io.ACEout
+    when (decoder.io.ACEout.A.valid || decoder.io.ACEout.C.valid || decoder.io.ACEout.E.valid) {
+	printf(p"At counter $counter, the decoder output: $ACE_decode_out \n")
+    }
+
+    // In the version that only the hardware is changed, all incoming data is always 0
+    // val incomingv = incomingPCISdat.io.deq
+    // printf(p"at counter $counter, the incoming value from the PCIe is $incomingv \n")
+
 
     // Use this next line when do atual software driver tests
     var hardware_testing = false;
