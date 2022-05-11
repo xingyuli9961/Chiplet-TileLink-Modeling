@@ -32,9 +32,10 @@ import freechips.rocketchip.tilelink._
 // Xingyu: Define special IO
 // This is the output side
 class ACEBundleIO extends Bundle {
-  val A = Decoupled(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-  val C = Decoupled(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
-  val E = Decoupled(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+  val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+  val A = Decoupled(new TLBundleA(tlparams))
+  val C = Decoupled(new TLBundleC(tlparams))
+  val E = Decoupled(new TLBundleE(tlparams))
 }
 
 class NICTargetIO extends Bundle {
@@ -45,9 +46,10 @@ class NICTargetIO extends Bundle {
 
 // The Fake bundle just for testing
 class ACEToken extends Bundle{
-    val A = new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val C = new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
-    val E = new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))
+    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+    val A = new TLBundleA(tlparams)
+    val C = new TLBundleC(tlparams)
+    val E = new TLBundleE(tlparams)
     val Avalid = Bool()
     val Cvalid = Bool()
     val Evalid = Bool()
@@ -110,15 +112,16 @@ class ACEBundleDMATokenGenerator extends Module {
     val outputgenerator = Module(new ACETokenGenerator)
     outputgenerator.io.in.A := io.ACEio.A.bits
     outputgenerator.io.in.C := io.ACEio.C.bits
-    outputgenerator.io.in.E := io.ACEio.E.bits.asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    outputgenerator.io.in.E := io.ACEio.E.bits
     outputgenerator.io.in.Avalid := io.ACEio.A.valid
     outputgenerator.io.in.Cvalid := io.ACEio.C.valid
     outputgenerator.io.in.Evalid := io.ACEio.E.valid
     outputgenerator.io.in.isACE := 1.U
 
     io.out.bits := outputgenerator.io.out
-    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid || io.ACEio.E.valid
-//    io.out.valid := io.ACEio.A.valid || io.ACEio.C.valid
+
+    // Always generate a token no matter if it is valid or not
+    io.out.valid := true.B
 
     io.ACEio.A.ready := io.out.ready
     io.ACEio.C.ready := io.out.ready
@@ -215,16 +218,9 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
 
-    // incomingPCISdat.io.deq.ready := false.B
-    // bigtokenToNIC.io.pcie_in <> incomingPCISdat.io.deq
-
     val counter = RegInit(UInt(32.W), 0.U)
     counter := counter + 1.U
 
-    val tokensToEnqueue = RegInit(0.U(32.W))
-    when (ACE_to_NIC_generator.io.out.valid) {
-        tokensToEnqueue := tokensToEnqueue + 1.U
-    }
     val Aw = BundleGenerator.io.A.bits.getWidth.asUInt
     val Cw = BundleGenerator.io.C.bits.getWidth.asUInt
     val Ew = BundleGenerator.io.E.bits.getWidth.asUInt
@@ -234,7 +230,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     }
     
     val probeACE2 = BundleGenerator.io
-    when (counter <= 200.U && ACE_to_NIC_generator.io.out.valid) {
+    when (counter <= 200.U && ((ACE_to_NIC_generator.io.out.bits & 15.U) > 1.U)) {
         printf(p"This is counter $counter \n")
         printf(p"The inside generated input is = $probeACE2 \n")
         printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
@@ -246,6 +242,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     // Test decoder: self-loop for correctness
     // decoder.io.in <> ACE_to_NIC_generator.io.out
+    // incomingPCISdat.io.deq.ready := false.B
 
     decoder.io.ACEout.A.ready := true.B
     decoder.io.ACEout.C.ready := true.B
@@ -263,7 +260,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     // Use this next line when do atual software driver tests
     var hardware_testing = false;
-    // val hardware_testing = true; 
+    / /val hardware_testing = true; 
 
     if (hardware_testing) {
         val macAddrRegUpper = Reg(UInt(32.W))
@@ -279,7 +276,6 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
         attach(pauseTimes, "pause_times", WriteOnly)
         genROReg(!tFire, "done")
     } else {
-	genROReg(tokensToEnqueue, "number_of_tokens")
 	genROReg(Aw, "Awidth")
 	genROReg(Cw, "Cwidth")
 	genROReg(Ew, "Ewidth")

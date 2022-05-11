@@ -33,6 +33,11 @@ import chipyard.iobinders.{IOBinders, OverrideIOBinder, ComposeIOBinder, GetSyst
 import chipyard.{HasHarnessSignalReferences}
 import chipyard.harness._
 
+// Xingyu
+import freechips.rocketchip.tilelink._
+// Xingyu
+
+
 object MainMemoryConsts {
   val regionNamePrefix = "MainMemory"
   def globalName = s"${regionNamePrefix}_${NodeIdx()}"
@@ -82,7 +87,7 @@ class WithSerialBridge extends OverrideHarnessBinder({
   }
 })
 
-// Xingyu: changed from NICIOvonly ACEBundleIO UInt(32.W)
+// Xingyu: changed from NICIOvonly ACEBundleIO UInt(32.W), and add tlparams for compiling
 class WithNICBridge extends OverrideHarnessBinder({
   (system: CanHavePeripheryIceNIC, th: FireSim, ports: Seq[ClockedIO[UInt]]) => {
     val p: Parameters = GetSystemParameters(system)
