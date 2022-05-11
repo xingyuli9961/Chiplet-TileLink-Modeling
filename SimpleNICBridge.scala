@@ -30,13 +30,16 @@ import chisel3.util._
 import chisel3.util.random._
 import freechips.rocketchip.tilelink._
 // Xingyu: Define special IO
-// This is the output side
-class ACEBundleIO extends Bundle {
-  val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
-  val A = Decoupled(new TLBundleA(tlparams))
-  val C = Decoupled(new TLBundleC(tlparams))
-  val E = Decoupled(new TLBundleE(tlparams))
+// This is the output side of A, C, E and input side of B, E
+class TLBundleIO(params: TLBundleParameters) extends Bundle {
+    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+    val A = Decoupled(new TLBundleA(params))
+    val B = Flipped(Decoupled(new TLBundleB(params)))
+    val C = Decoupled(new TLBundleC(params))
+    val D = Flipped(Decoupled(new TLBundleD(params)))
+    val E = Decoupled(new TLBundleE(params))
 }
+
 
 class NICTargetIO extends Bundle {
   val clock = Input(Clock())
@@ -44,130 +47,80 @@ class NICTargetIO extends Bundle {
   val nic = Input(UInt(32.W))
 }
 
-// The Fake bundle just for testing
-class ACEToken extends Bundle{
-    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
-    val A = new TLBundleA(tlparams)
-    val C = new TLBundleC(tlparams)
-    val E = new TLBundleE(tlparams)
+
+// The ACE transmitter side Big Token into the PCIe port
+class ACEBigToken(params: TLBundleParameters) extends Bundle {
+    val A = new TLBundleA(params)
+    val C = new TLBundleC(params)
+    val E = new TLBundleE(params)
     val Avalid = Bool()
     val Cvalid = Bool()
     val Evalid = Bool()
-    val isACE = UInt(1.W)
+    val Bready = Bool()
+    val Dready = Bool()
+    val isACE = UInt(3.W)
 }
 
-// Random ACEToken Generator
-class ACEIOInputGenerator extends Module {
-    val io = IO(new ACEBundleIO)
-    
-    // A variable indicating each token is generated in how many cycles
-    val period = 10.U
-    val max_num_tokens = 29.U 
-    val p_counter = RegInit(UInt(32.W), 0.U)
 
+// Random ACEBigToken Generator
+class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
+    val io = IO(new TLBundleIO(params))
+
+    // The variable indicating each token is generated in how many cycles
+    val period = 10.U
+    // This value should be num_Big_tokens * 3 - 1
+    val max_num_tokens = 2999.U
+    val p_counter = RegInit(UInt(32.W), 0.U)
     val counter = RegInit(UInt(32.W), 0.U)
 
     when (p_counter < period - 1.U || counter > max_num_tokens) {
         counter := counter
-        p_counter := p_counter + 1.U
+	p_counter := p_counter + 1.U
         io.A.valid := false.B
         io.C.valid := false.B
         io.E.valid := false.B
     } .otherwise {
-        counter := counter + 3.U
+	counter := counter + 3.U
         p_counter := 0.U
         io.A.valid := true.B
         io.C.valid := LFSR(16) >= 134.U
         io.E.valid := (LFSR(16) & 1.U) === 1.U
     }
-
     io.A.bits := counter.asTypeOf(new TLBundleA(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true))) 
     io.C.bits := (counter + 1.U).asTypeOf(new TLBundleC(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
     io.E.bits := (counter + 2.U).asTypeOf(new TLBundleE(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
 
-//    when (counter === 0.U) {
-//        printf(p"Simulation starts\n")
-//    }
-
-//    when (counter <= 100.U) {
-//        printf(p"The output at counter $counter = $io \n")
-//    }
+    io.B.ready := false.B
+    io.D.ready := false.B
 }
 
-// Pack ACEBundleIO into ACEToken into 512 bits
-class ACETokenGenerator extends Module {
-    val io = IO(new Bundle{
-        val in = Input(new ACEToken)
-        val out = Output(UInt(512.W))
-    })
-    io.out := io.in.asUInt
-    require(io.in.asUInt.getWidth <= 512)
-}
 
-class ACEBundleDMATokenGenerator extends Module {
+// Pack selecetd signals in TL bundles into ACEBigToken as 512 bits
+class ACEBigTokenGenerator(params: TLBundleParameters) extends Module {
     val io = IO(new Bundle{
-        val ACEio = Flipped(new ACEBundleIO)
+        val in = Input(new ACEBigToken(params))
         val out = Decoupled(UInt(512.W))
     })
-    val outputgenerator = Module(new ACETokenGenerator)
-    outputgenerator.io.in.A := io.ACEio.A.bits
-    outputgenerator.io.in.C := io.ACEio.C.bits
-    outputgenerator.io.in.E := io.ACEio.E.bits
-    outputgenerator.io.in.Avalid := io.ACEio.A.valid
-    outputgenerator.io.in.Cvalid := io.ACEio.C.valid
-    outputgenerator.io.in.Evalid := io.ACEio.E.valid
-    outputgenerator.io.in.isACE := 1.U
 
-    io.out.bits := outputgenerator.io.out
-
+    io.out.bits := io.in.asUInt
+    require(io.in.asUInt.getWidth <= 512)
     // Always generate a token no matter if it is valid or not
     io.out.valid := true.B
-
-    io.ACEio.A.ready := io.out.ready
-    io.ACEio.C.ready := io.out.ready
-    io.ACEio.E.ready := io.out.ready
 }
 
 
-// Dis-assemble 512 bits into ACEToken
-class ACETokenDecoder extends Module {
+// Decode 512-bit token from PCIe into ACEBigToken
+class ACEBigTokenDecoder(params: TLBundleParameters) extends Module {
     val io = IO(new Bundle{
-        val in = Input(UInt(512.W))
-        val out = Output(new ACEToken)
+        val in = Flipped(Decoupled(UInt(512.W)))
+        val out = Decoupled(new ACEBigToken(params))
     })
-    io.out := io.in.asTypeOf(new ACEToken)
+    io.out.bits := io.in.bits.asTypeOf(new ACEBigToken(params))
+    io.out.valid := io.in.valid
+    io.in.ready := io.out.ready
 }
 
-
-class ACETokentoBundlesDecoder extends Module {
-    val io = IO(new Bundle {
-	val in = Flipped(Decoupled(UInt(512.W)))
-        val ACEout = new ACEBundleIO
-    })
-    val PCIeparser = Module(new ACETokenDecoder)
-    PCIeparser.io.in := io.in.bits
-    io.in.ready := io.ACEout.A.ready && io.ACEout.C.ready && io.ACEout.E.ready
-    io.ACEout.A.bits := PCIeparser.io.out.A
-    io.ACEout.C.bits := PCIeparser.io.out.C
-    io.ACEout.E.bits := PCIeparser.io.out.E
-    io.ACEout.A.valid := PCIeparser.io.out.Avalid && io.in.valid
-    io.ACEout.C.valid := PCIeparser.io.out.Cvalid && io.in.valid
-    io.ACEout.E.valid := PCIeparser.io.out.Evalid && io.in.valid
-    // require(PCIeparser.io.out.isACE == true.B) 
-
-    val counter = RegInit(UInt(32.W), 0.U)
-    counter := counter + 1.U
-    when (counter === 0.U) {
-        printf(p"The decoder actually instantiated\n")
-    } 
-    when (counter === 5.U) {
-	printf(p"Just a print at $counter \n")
-    }
-}
-
-
-// Xinyu: End
-// Xingyu
+// Xingyu: End
 
 
 class NICBridge(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[NICTargetIO], SimpleNICBridgeModule] {
@@ -208,49 +161,73 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     lazy val dmaSize = BigInt((BIG_TOKEN_WIDTH / 8) * TOKEN_QUEUE_DEPTH)
  
     // Xingyu: Start
-    val ACE_to_NIC_generator = Module(new ACEBundleDMATokenGenerator)
+    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+    val ACEMasterBigTokenGenerator = Module(new ACEBigTokenGenerator((tlparams)))
 
-    // A hacky way to do
-    val BundleGenerator = Module(new ACEIOInputGenerator)
-    ACE_to_NIC_generator.io.ACEio <> BundleGenerator.io
+    // A Hacky to to test the bridge
+    val InputGenerator = Module(new ACEsideIOInputGenerator(tlparams))
 
-    // ACE_to_NIC_generator.io.ACEio <> hPort.hBits.nic
+    // Connect the IOs
+    ACEMasterBigTokenGenerator.io.in.A := InputGenerator.io.A.bits
+    ACEMasterBigTokenGenerator.io.in.C := InputGenerator.io.C.bits
+    ACEMasterBigTokenGenerator.io.in.E := InputGenerator.io.E.bits
+    ACEMasterBigTokenGenerator.io.in.Avalid := InputGenerator.io.A.valid
+    ACEMasterBigTokenGenerator.io.in.Cvalid := InputGenerator.io.C.valid
+    ACEMasterBigTokenGenerator.io.in.Evalid := InputGenerator.io.E.valid
+    ACEMasterBigTokenGenerator.io.in.Bready := InputGenerator.io.B.ready
+    ACEMasterBigTokenGenerator.io.in.Dready := InputGenerator.io.D.ready
+    ACEMasterBigTokenGenerator.io.in.isACE := 1.U
 
-    outgoingPCISdat.io.enq <> ACE_to_NIC_generator.io.out
+    outgoingPCISdat.io.enq <> ACEMasterBigTokenGenerator.io.out
+
+    InputGenerator.io.A.ready := false.B
+    InputGenerator.io.C.ready := false.B
+    InputGenerator.io.E.ready := false.B
+    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleB(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleD(TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)))
+    InputGenerator.io.B.valid := false.B
+    InputGenerator.io.D.valid := false.B
+
 
     val counter = RegInit(UInt(32.W), 0.U)
     counter := counter + 1.U
 
-    val Aw = BundleGenerator.io.A.bits.getWidth.asUInt
-    val Cw = BundleGenerator.io.C.bits.getWidth.asUInt
-    val Ew = BundleGenerator.io.E.bits.getWidth.asUInt
+    val Aw = InputGenerator.io.A.bits.getWidth.asUInt
+    val Bw = InputGenerator.io.B.bits.getWidth.asUInt
+    val Cw = InputGenerator.io.C.bits.getWidth.asUInt
+    val Dw = InputGenerator.io.D.bits.getWidth.asUInt
+    val Ew = InputGenerator.io.E.bits.getWidth.asUInt
+
     
     when (counter === 0.U) {
-        printf(p"The A, C, E channel widths are $Aw, $Cw, $Ew \n")
+        printf(p"The A,B, C, D, E channel widths are $Aw, $Bw, $Cw, $Dw, $Ew \n")
+        printf(p"TLbundle IO version. \n")
     }
     
-    val probeACE2 = BundleGenerator.io
-    when (counter <= 200.U && ((ACE_to_NIC_generator.io.out.bits & 15.U) > 1.U)) {
-        printf(p"This is counter $counter \n")
-        printf(p"The inside generated input is = $probeACE2 \n")
-        printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
-    }
+    val probeACE2 = InputGenerator.io
+//    when (counter <= 200.U) {
+//        printf(p"This is counter $counter \n")
+//        printf(p"The inside generated input is = $probeACE2 \n")
+//        printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
+//    }
 
     // The decoder
-    val decoder = Module(new ACETokentoBundlesDecoder)
-    decoder.io.in <> incomingPCISdat.io.deq    
+    val ACEdecoder = Module(new ACEBigTokenDecoder(tlparams))
+    ACEdecoder.io.in <> incomingPCISdat.io.deq
 
-    // Test decoder: self-loop for correctness
-    // decoder.io.in <> ACE_to_NIC_generator.io.out
+    ACEdecoder.io.out.ready := true.B
+
+    // Test decoder
+    // ACEdecoder.io.in <> ACEMasterBigTokenGenerator.io.out
     // incomingPCISdat.io.deq.ready := false.B
 
-    decoder.io.ACEout.A.ready := true.B
-    decoder.io.ACEout.C.ready := true.B
-    decoder.io.ACEout.E.ready := true.B
+    val ACE_decode_out = ACEdecoder.io.out
 
-    val ACE_decode_out = decoder.io.ACEout
-    when (decoder.io.ACEout.A.valid || decoder.io.ACEout.C.valid || decoder.io.ACEout.E.valid) {
+    when (ACEdecoder.io.out.bits.Avalid || ACEdecoder.io.out.bits.Cvalid || ACEdecoder.io.out.bits.Evalid) {
 	printf(p"At counter $counter, the decoder output: $ACE_decode_out \n")
+        when (ACEdecoder.io.out.valid && (ACEdecoder.io.out.bits.isACE =/= 1.U)) {
+	    printf(p"Error, wrong token here \n")
+        }
     }
 
     // In the version that only the hardware is changed, all incoming data is always 0
@@ -259,8 +236,8 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
 
     // Use this next line when do atual software driver tests
-    var hardware_testing = false;
-    / /val hardware_testing = true; 
+    val hardware_testing = false;
+    // val hardware_testing = true; 
 
     if (hardware_testing) {
         val macAddrRegUpper = Reg(UInt(32.W))
@@ -277,7 +254,9 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
         genROReg(!tFire, "done")
     } else {
 	genROReg(Aw, "Awidth")
+        genROReg(Bw, "Bwidth")
 	genROReg(Cw, "Cwidth")
+	genROReg(Dw, "Dwidth")
 	genROReg(Ew, "Ewidth")
     }
 
