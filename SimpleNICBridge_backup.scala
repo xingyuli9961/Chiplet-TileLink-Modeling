@@ -46,6 +46,18 @@ class NICTargetIO extends Bundle {
   val nic = Input(UInt(32.W))
 }
 
+class ACENICTargetIO(params: TLBundleParameters)  extends Bundle {
+  val clock = Input(Clock())
+  val nic = Flipped(new TLBundleIO(params))
+  
+}
+
+class BDNICTargetIO(params: TLBundleParameters)  extends Bundle {
+  val clock = Input(Clock())
+  val nic = new TLBundleIO(params)
+  
+}
+
 
 // The ACE transmitter side Big Token into the PCIe port
 class ACEBigToken(params: TLBundleParameters) extends Bundle {
@@ -87,20 +99,20 @@ class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
 
     when (p_counter < period - 1.U || counter > max_num_tokens) {
         counter := counter
-        p_counter := p_counter + 1.U
+	      p_counter := p_counter + 1.U
         io.A.valid := false.B
         io.C.valid := false.B
         io.E.valid := false.B
     } .otherwise {
-        counter := counter + 1.U
+	      counter := counter + 1.U
         p_counter := 0.U
         io.A.valid := true.B
         io.C.valid := LFSR(16) >= 134.U
         io.E.valid := (LFSR(16) & 1.U) === 1.U
     }
     io.A.bits := counter.asTypeOf(new TLBundleA(params)) 
-    io.C.bits := counter.asTypeOf(new TLBundleA(params)) 
-    io.E.bits := counter.asTypeOf(new TLBundleA(params)) 
+    io.C.bits := counter.asTypeOf(new TLBundleC(params))
+    io.E.bits := counter.asTypeOf(new TLBundleE(params))
 
     io.B.ready := false.B
     io.D.ready := false.B
@@ -111,6 +123,18 @@ class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
 class ACEBigTokenGenerator(params: TLBundleParameters) extends Module {
     val io = IO(new Bundle{
         val in = Input(new ACEBigToken(params))
+        val out = Decoupled(UInt(512.W))
+    })
+
+    io.out.bits := io.in.asUInt
+    require(io.in.asUInt.getWidth <= 512)
+    // Always generate a token no matter if it is valid or not
+    io.out.valid := true.B
+}
+
+class BDBigTokenGenerator(params: TLBundleParameters) extends Module {
+    val io = IO(new Bundle{
+        val in = Input(new BDBigToken(params))
         val out = Decoupled(UInt(512.W))
     })
 
@@ -131,6 +155,21 @@ class ACEBigTokenDecoder(params: TLBundleParameters) extends Module {
     io.out.valid := io.in.valid
     io.in.ready := io.out.ready
 }
+
+// Decode 512-bit token from PCIe into BDBigToken
+class BDBigTokenDecoder(params: TLBundleParameters) extends Module {
+    val io = IO(new Bundle{
+        val in = Flipped(Decoupled(UInt(512.W)))
+        val out = Decoupled(new BDBigToken(params))
+    })
+    io.out.bits := io.in.bits.asTypeOf(new BDBigToken(params))
+    io.out.valid := io.in.valid
+    io.in.ready := io.out.ready
+}
+
+
+
+
 // Xingyu: End
 
 
@@ -145,6 +184,40 @@ class NICBridge(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[
 object NICBridge {
   def apply(clock: Clock, nicIO: UInt)(implicit p: Parameters): NICBridge = {
     val ep = Module(new NICBridge)
+    ep.io.nic <> nicIO
+    ep.io.clock := clock
+    ep
+  }
+}
+
+
+class ACENICBridge(params: TLBundleParameters)(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[ACENICTargetIO(params)], ACESimpleNICBridgeModule] {
+  val io = IO(new ACENICTargetIO(params))
+  val bridgeIO = HostPort(io)
+  val constructorArg = None
+  generateAnnotations()
+}
+
+
+class BDNICBridge(params: TLBundleParameters)(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[BDNICTargetIO(params)], BDSimpleNICBridgeModule] {
+  val io = IO(new BDNICTargetIO(params))
+  val bridgeIO = HostPort(io)
+  val constructorArg = None
+  generateAnnotations()
+}
+
+object ACENICBridge {
+  def apply(clock: Clock, nicIO: TLBundleIO)(params: TLBundleParameters)(implicit p: Parameters): ACENICBridge = {
+    val ep = Module(new ACENICBridge(params))
+    ep.io.nic <> nicIO
+    ep.io.clock := clock
+    ep
+  }
+}
+
+object BDNICBridge {
+  def apply(clock: Clock, nicIO: TLBundleIO)(params: TLBundleParameters)(implicit p: Parameters): BDNICBridge = {
+    val ep = Module(new BDNICBridge(params))
     ep.io.nic <> nicIO
     ep.io.clock := clock
     ep
@@ -194,8 +267,8 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     InputGenerator.io.A.ready := false.B
     InputGenerator.io.C.ready := false.B
     InputGenerator.io.E.ready := false.B
-    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleA(params)) 
-    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleA(params)) 
+    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleB(params))
+    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleD(params))
     InputGenerator.io.B.valid := false.B
     InputGenerator.io.D.valid := false.B
 
@@ -235,9 +308,9 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     val ACE_decode_out = ACEdecoder.io.out
 
     when (ACEdecoder.io.out.bits.Avalid || ACEdecoder.io.out.bits.Cvalid || ACEdecoder.io.out.bits.Evalid) {
-        printf(p"At counter $counter, the decoder output: $ACE_decode_out \n")
+	      printf(p"At counter $counter, the decoder output: $ACE_decode_out \n")
         when (ACEdecoder.io.out.valid && (ACEdecoder.io.out.bits.isACE =/= 1.U)) {
-            printf(p"Error, wrong token here \n")
+	          printf(p"Error, wrong token here \n")
         }
     }
 
@@ -264,14 +337,160 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
         attach(pauseTimes, "pause_times", WriteOnly)
         genROReg(!tFire, "done")
     } else {
-        genROReg(Aw, "Awidth")
+	      genROReg(Aw, "Awidth")
         genROReg(Bw, "Bwidth")
-        genROReg(Cw, "Cwidth")
-        genROReg(Dw, "Dwidth")
-        genROReg(Ew, "Ewidth")
+      	genROReg(Cw, "Cwidth")
+      	genROReg(Dw, "Dwidth")
+      	genROReg(Ew, "Ewidth")
     }
 
     genCRFile()
     // Xingyu: End
   }
 }
+
+
+// Master Side of the Bridge, send ACE and receive BD
+class ACESimpleNICBridgeModule(params: TLBundleParameters)(implicit p: Parameters) extends BridgeModule[HostPortIO[ACENICTargetIO]]()(p) {
+  lazy val module = new BridgeModuleImp(this) with BidirectionalDMA {
+    val io = IO(new WidgetIO)
+    val hPort = IO(HostPort(new ACENICTargetIO(params)))
+   
+    // DMA mixin parameters
+    lazy val fromHostCPUQueueDepth = TOKEN_QUEUE_DEPTH
+    lazy val toHostCPUQueueDepth   = TOKEN_QUEUE_DEPTH
+    // Biancolin: Need to look into this
+    lazy val dmaSize = BigInt((BIG_TOKEN_WIDTH / 8) * TOKEN_QUEUE_DEPTH)
+ 
+    // Xingyu: Start
+    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+
+    
+    val ACEMasterBigTokenGenerator = Module(new ACEBigTokenGenerator((tlparams)))
+    // Connect the transmitter IOs
+    ACEMasterBigTokenGenerator.io.in.A := hPort.nic.A.bits
+    ACEMasterBigTokenGenerator.io.in.C := hPort.nic.C.bits
+    ACEMasterBigTokenGenerator.io.in.E := hPort.nic.E.bits
+    ACEMasterBigTokenGenerator.io.in.Avalid := hPort.nic.A.valid
+    ACEMasterBigTokenGenerator.io.in.Cvalid := hPort.nic.C.valid
+    ACEMasterBigTokenGenerator.io.in.Evalid := hPort.nic.E.valid
+    ACEMasterBigTokenGenerator.io.in.Bready := hPort.nic.B.ready
+    ACEMasterBigTokenGenerator.io.in.Dready := hPort.nic.D.ready
+    ACEMasterBigTokenGenerator.io.in.isACE := 1.U
+
+    outgoingPCISdat.io.enq <> ACEMasterBigTokenGenerator.io.out
+
+
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 1.U
+
+    val Aw = hPort.nic.A.bits.getWidth.asUInt
+    val Bw = hPort.nic.B.bits.getWidth.asUInt
+    val Cw = hPort.nic.C.bits.getWidth.asUInt
+    val Dw = hPort.nic.D.bits.getWidth.asUInt
+    val Ew = hPort.nic.E.bits.getWidth.asUInt
+
+    
+    // when (counter === 0.U) {
+    //     printf(p"The A,B, C, D, E channel widths are $Aw, $Bw, $Cw, $Dw, $Ew \n")
+    //     printf(p"BD side version. \n")
+    // }
+
+    // The decoder
+    val BDdecoder = Module(new BDBigTokenDecoder(tlparams))
+    BDdecoder.io.in <> incomingPCISdat.io.deq
+
+    BDdecoder.io.out.ready := true.B
+
+    hPort.nic.B.bits := BDdecoder.io.out.bits.B
+    hPort.nic.D.bits := BDdecoder.io.out.bits.D
+    hPort.nic.B.valid := BDdecoder.io.out.bits.Bvalid
+    hPort.nic.D.valid := BDdecoder.io.out.bits.Dvalid
+    hPort.nic.A.ready := BDdecoder.io.out.bits.Aready
+    hPort.nic.C.ready := BDdecoder.io.out.bits.Cready
+    hPort.nic.E.ready := BDdecoder.io.out.bits.Eready
+
+
+    genROReg(Aw, "Awidth")
+    genROReg(Bw, "Bwidth")
+    genROReg(Cw, "Cwidth")
+    genROReg(Dw, "Dwidth")
+    genROReg(Ew, "Ewidth")
+
+    genCRFile()
+    // Xingyu: End
+  }
+}
+
+// Slave Side of the Bridge, send BD and receive ACE
+class BDSimpleNICBridgeModule(params: TLBundleParameters)(implicit p: Parameters) extends BridgeModule[HostPortIO[BDNICTargetIO]]()(p) {
+  lazy val module = new BridgeModuleImp(this) with BidirectionalDMA {
+    val io = IO(new WidgetIO)
+    val hPort = IO(HostPort(new BDNICTargetIO(params)))
+   
+    // DMA mixin parameters
+    lazy val fromHostCPUQueueDepth = TOKEN_QUEUE_DEPTH
+    lazy val toHostCPUQueueDepth   = TOKEN_QUEUE_DEPTH
+    // Biancolin: Need to look into this
+    lazy val dmaSize = BigInt((BIG_TOKEN_WIDTH / 8) * TOKEN_QUEUE_DEPTH)
+ 
+    // Xingyu: Start
+    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
+
+
+    val BDSlaveBigTokenGenerator = Module(new BDBigTokenGenerator((tlparams)))
+    // Connect the transmitter IOs
+    BDSlaveBigTokenGenerator.io.in.B := hPort.nic.B.bits
+    BDSlaveBigTokenGenerator.io.in.D := hPort.nic.D.bits
+    BDSlaveBigTokenGenerator.io.in.Bvalid := hPort.nic.B.valid
+    BDSlaveBigTokenGenerator.io.in.Dvalid := hPort.nic.D.valid
+    BDSlaveBigTokenGenerator.io.in.Aready := hPort.nic.A.ready
+    BDSlaveBigTokenGenerator.io.in.Cready := hPort.nic.C.ready
+    BDSlaveBigTokenGenerator.io.in.Eready := hPort.nic.E.ready
+    BDSlaveBigTokenGenerator.io.in.isACE := 0.U
+
+    outgoingPCISdat.io.enq <> BDSlaveBigTokenGenerator.io.out
+
+
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 1.U
+
+    val Aw = hPort.nic.A.bits.getWidth.asUInt
+    val Bw = hPort.nic.B.bits.getWidth.asUInt
+    val Cw = hPort.nic.C.bits.getWidth.asUInt
+    val Dw = hPort.nic.D.bits.getWidth.asUInt
+    val Ew = hPort.nic.E.bits.getWidth.asUInt
+
+    
+    // when (counter === 0.U) {
+    //     printf(p"The A,B, C, D, E channel widths are $Aw, $Bw, $Cw, $Dw, $Ew \n")
+    //     printf(p"BD side version. \n")
+    // }
+
+    // The decoder
+    val ACEdecoder = Module(new ACEBigTokenDecoder(tlparams))
+    ACEdecoder.io.in <> incomingPCISdat.io.deq
+
+    ACEdecoder.io.out.ready := true.B
+
+    hPort.nic.A.bits := ACEdecoder.io.out.bits.A
+    hPort.nic.C.bits := ACEdecoder.io.out.bits.C
+    hPort.nic.E.bits := ACEdecoder.io.out.bits.E
+    hPort.nic.A.valid := ACEdecoder.io.out.bits.Avalid
+    hPort.nic.C.valid := ACEdecoder.io.out.bits.Cvalid
+    hPort.nic.E.valid := ACEdecoder.io.out.bits.Evalid
+    hPort.nic.B.ready := ACEdecoder.io.out.bits.Bready
+    hPort.nic.D.ready := ACEdecoder.io.out.bits.Dready
+
+
+    genROReg(Aw, "Awidth")
+    genROReg(Bw, "Bwidth")
+    genROReg(Cw, "Cwidth")
+    genROReg(Dw, "Dwidth")
+    genROReg(Ew, "Ewidth")
+
+    genCRFile()
+    // Xingyu: End
+  }
+}
+
