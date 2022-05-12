@@ -32,7 +32,6 @@ import freechips.rocketchip.tilelink._
 // Xingyu: Define special IO
 // This is the output side of A, C, E and input side of B, E
 class TLBundleIO(params: TLBundleParameters) extends Bundle {
-    val tlparams = TLBundleParameters(32, 64, 8, 8, 8, Nil, Nil, Nil, true)
     val A = Decoupled(new TLBundleA(params))
     val B = Flipped(Decoupled(new TLBundleB(params)))
     val C = Decoupled(new TLBundleC(params))
@@ -62,6 +61,19 @@ class ACEBigToken(params: TLBundleParameters) extends Bundle {
 }
 
 
+// The BD transmitter side Big Token into the PCIe port 
+class BDBigToken(params: TLBundleParameters) extends Bundle {
+    val B = new TLBundleB(params)
+    val D = new TLBundleD(params)
+    val Bvalid = Bool()
+    val Dvalid = Bool()
+    val Aready = Bool()
+    val Cready = Bool()
+    val Eready = Bool()
+    val isACE = UInt(3.W)
+}
+
+
 // Random ACEBigToken Generator
 class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
     val io = IO(new TLBundleIO(params))
@@ -69,7 +81,7 @@ class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
     // The variable indicating each token is generated in how many cycles
     val period = 10.U
     // This value should be num_Big_tokens * 3 - 1
-    val max_num_tokens = 2999.U
+    val max_num_tokens = 29.U
     val p_counter = RegInit(UInt(32.W), 0.U)
     val counter = RegInit(UInt(32.W), 0.U)
 
@@ -119,7 +131,6 @@ class ACEBigTokenDecoder(params: TLBundleParameters) extends Module {
     io.out.valid := io.in.valid
     io.in.ready := io.out.ready
 }
-
 // Xingyu: End
 
 
