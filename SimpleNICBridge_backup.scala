@@ -267,8 +267,8 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     InputGenerator.io.A.ready := false.B
     InputGenerator.io.C.ready := false.B
     InputGenerator.io.E.ready := false.B
-    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleB(params))
-    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleD(params))
+    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleB(tlparams))
+    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleD(tlparams))
     InputGenerator.io.B.valid := false.B
     InputGenerator.io.D.valid := false.B
 

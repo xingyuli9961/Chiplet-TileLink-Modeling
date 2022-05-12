@@ -99,8 +99,8 @@ class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
         io.E.valid := (LFSR(16) & 1.U) === 1.U
     }
     io.A.bits := counter.asTypeOf(new TLBundleA(params)) 
-    io.C.bits := counter.asTypeOf(new TLBundleA(params)) 
-    io.E.bits := counter.asTypeOf(new TLBundleA(params)) 
+    io.C.bits := counter.asTypeOf(new TLBundleC(params)) 
+    io.E.bits := counter.asTypeOf(new TLBundleE(params)) 
 
     io.B.ready := false.B
     io.D.ready := false.B
@@ -194,8 +194,8 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     InputGenerator.io.A.ready := false.B
     InputGenerator.io.C.ready := false.B
     InputGenerator.io.E.ready := false.B
-    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleA(params)) 
-    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleA(params)) 
+    InputGenerator.io.B.bits := (0.U).asTypeOf(new TLBundleB(tlparams)) 
+    InputGenerator.io.D.bits := (0.U).asTypeOf(new TLBundleD(tlparams)) 
     InputGenerator.io.B.valid := false.B
     InputGenerator.io.D.valid := false.B
 
