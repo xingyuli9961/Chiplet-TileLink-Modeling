@@ -28,7 +28,9 @@ int is_valid_flit(uint8_t * recv_buf, int tokenid) {
 
     uint64_t lrv = ((uint64_t*)recv_buf)[base*8];
     int bitoffset = 43 + (offset * 3);
-    return (lrv >> bitoffset) & 0x1;
+    //fprintf(stdout, "lrv of flit: %d\n", lrv);
+    //return (lrv >> bitoffset) & 0x1;
+    return 1;
 }
 
 int is_last_flit(uint8_t * recv_buf, int tokenid) {

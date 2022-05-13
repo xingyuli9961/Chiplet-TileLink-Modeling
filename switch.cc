@@ -98,11 +98,12 @@ void do_fast_switching() {
 for (int port = 0; port < NUMPORTS; port++) {
     BasePort * current_port = ports[port];
     uint8_t * input_port_buf = current_port->current_input_buf;
-
+    fprintf(stdout, "Working on Port %d\n", port);
     for (int tokenno = 0; tokenno < NUM_TOKENS; tokenno++) {
+        //fprintf(stdout, "is there a valid flit: %d\n", is_valid_flit(input_port_buf, tokenno));
         if (is_valid_flit(input_port_buf, tokenno)) {
             uint64_t flit = get_flit(input_port_buf, tokenno);
-
+            //fprintf(stdout, "flit code: %d\n", flit);
             switchpacket * sp;
             if (!(current_port->input_in_progress)) {
                 sp = (switchpacket*)calloc(sizeof(switchpacket), 1);
@@ -126,7 +127,7 @@ for (int port = 0; port < NUMPORTS; port++) {
         }
     }
 }
-
+fprintf(stdout, "done preprocessing\n");
 // next do the switching. but this switching is just shuffling pointers,
 // so it should be fast. it has to be serial though...
 
@@ -153,8 +154,9 @@ typedef struct tspacket tspacket;
 
 // TODO thread safe priority queue? could do in parallel?
 std::priority_queue<tspacket> pqueue;
-
+fprintf(stdout, "starting switching\n");
 for (int i = 0; i < NUMPORTS; i++) {
+    fprintf(stdout, "Port %d is empty: %d\n", i, ports[i]->inputqueue.empty());
     while (!(ports[i]->inputqueue.empty())) {
         switchpacket * sp = ports[i]->inputqueue.front();
         ports[i]->inputqueue.pop();
@@ -166,9 +168,10 @@ for (int i = 0; i < NUMPORTS; i++) {
 while (!pqueue.empty()) {
     switchpacket * tsp = pqueue.top().switchpack;
     pqueue.pop();
-    uint16_t send_to_port = get_port_from_flit(tsp->dat[0], 0 /* junk remove arg */);
-    //printf("packet for port: %x\n", send_to_port);
-    //printf("packet timestamp: %ld\n", tsp->timestamp);
+    uint16_t send_to_port = 1 - tsp->sender;
+    fprintf(stdout, "packet for port: %x\n", send_to_port);
+    fprintf(stdout, "packet from port: %x\n", tsp->sender);
+    fprintf(stdout, "packet timestamp: %ld\n", tsp->timestamp);
     if (send_to_port == BROADCAST_ADJUSTED) {
 #define ADDUPLINK (NUMUPLINKS > 0 ? 1 : 0)
         // this will only send broadcasts to the first (zeroeth) uplink.
@@ -234,7 +237,7 @@ int main (int argc, char *argv[]) {
     fprintf(stdout, "Using link latency: %d\n", LINKLATENCY);
     fprintf(stdout, "Using switching latency: %d\n", SWITCHLATENCY);
     fprintf(stdout, "BW throttle set to %d/%d\n", throttle_numer, throttle_denom);
-
+    fprintf(stdout, "Number of ports: %d", NUMPORTS);
     if ((LINKLATENCY % 7) != 0) {
         // if invalid link latency, error out.
         fprintf(stdout, "INVALID LINKLATENCY. Currently must be multiple of 7 cycles.\n");
@@ -265,11 +268,12 @@ int main (int argc, char *argv[]) {
         for (int port = 0; port < NUMPORTS; port++) {
             ports[port]->tick_pre();
         }
-
+        
+        fprintf(stdout, "Entering fast switching\n");
         do_fast_switching();
 
         this_iter_cycles_start += LINKLATENCY; // keep track of time
-
+        fprintf(stdout, "Cycles: %d\n", this_iter_cycles_start);
         // some ports need to handle extra stuff after each iteration
         // e.g. shmem ports swapping shared buffers
 #pragma omp parallel for
