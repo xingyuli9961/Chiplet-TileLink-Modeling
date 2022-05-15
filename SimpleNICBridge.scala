@@ -18,7 +18,7 @@ import junctions.{NastiIO, NastiKey}
 object TokenQueueConsts {
   val TOKENS_PER_BIG_TOKEN = 7
   val BIG_TOKEN_WIDTH = (TOKENS_PER_BIG_TOKEN + 1) * 64
-  val TOKEN_QUEUE_DEPTH = 6144
+  val TOKEN_QUEUE_DEPTH = 100
 }
 import TokenQueueConsts._
 
@@ -77,15 +77,23 @@ class BDBigToken(params: TLBundleParameters) extends Bundle {
 // Random ACEBigToken Generator
 class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
     val io = IO(new TLBundleIO(params))
+    val ready = IO(Input(Bool()))
 
     // The variable indicating each token is generated in how many cycles
-    val period = 10.U
+    val period = 1.U
     // This value should be num_Big_tokens
-    val max_num_tokens = 100.U
+    val max_num_tokens = 1000.U
     val p_counter = RegInit(UInt(32.W), 0.U)
-    val counter = RegInit(UInt(32.W), 0.U)
+    val counter = RegInit(UInt(32.W), 1.U)
 
-    when (p_counter < period - 1.U || counter > max_num_tokens) {
+    val init_counter = RegInit(UInt(32.W), 0.U)
+    when (init_counter < 200.U) {
+        init_counter := init_counter + 1.U
+    } .otherwise {
+        init_counter := init_counter
+    }
+
+    when (p_counter < period - 1.U || counter > max_num_tokens || ready === false.B) {
         counter := counter
         p_counter := p_counter + 1.U
         io.A.valid := false.B
@@ -95,8 +103,10 @@ class ACEsideIOInputGenerator(params: TLBundleParameters) extends Module {
         counter := counter + 1.U
         p_counter := 0.U
         io.A.valid := true.B
-        io.C.valid := LFSR(16) >= 134.U
-        io.E.valid := (LFSR(16) & 1.U) === 1.U
+        io.C.valid := true.B
+        io.E.valid := true.B
+        // io.C.valid := LFSR(16) >= 134.U
+        // io.E.valid := (LFSR(16) & 1.U) === 1.U
     }
     io.A.bits := counter.asTypeOf(new TLBundleA(params)) 
     io.C.bits := counter.asTypeOf(new TLBundleC(params)) 
@@ -112,12 +122,19 @@ class ACEBigTokenGenerator(params: TLBundleParameters) extends Module {
     val io = IO(new Bundle{
         val in = Input(new ACEBigToken(params))
         val out = Decoupled(UInt(512.W))
+        val ready = Output(Bool())
     })
 
     io.out.bits := io.in.asUInt
     require(io.in.asUInt.getWidth <= 512)
-    // Always generate a token no matter if it is valid or not
-    io.out.valid := true.B
+    // Always generate a token no matter if it is valid or not, as long as the DMA port is ready
+//    val PCIready = io.out.ready
+//    printf(p"The ready bit is $PCIready\n")
+    val counter = RegInit(UInt(32.W), 0.U)
+    counter := counter + 1.U
+    // XINGYU: remove && counter < 1000.U after tests
+    io.out.valid := io.out.ready
+    io.ready := io.out.ready
 }
 
 
@@ -177,6 +194,7 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     // A Hacky to to test the bridge
     val InputGenerator = Module(new ACEsideIOInputGenerator(tlparams))
+    InputGenerator.ready := ACEMasterBigTokenGenerator.io.ready
 
     // Connect the IOs
     ACEMasterBigTokenGenerator.io.in.A := InputGenerator.io.A.bits
@@ -202,6 +220,12 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
 
     val counter = RegInit(UInt(32.W), 0.U)
     counter := counter + 1.U
+    val hardware_counter = RegInit(UInt(32.W), 0.U)
+    when (incomingPCISdat.io.deq.valid) {
+        hardware_counter := hardware_counter + 1.U
+    } .otherwise {
+        hardware_counter := hardware_counter
+    }
 
     val Aw = InputGenerator.io.A.bits.getWidth.asUInt
     val Bw = InputGenerator.io.B.bits.getWidth.asUInt
@@ -215,13 +239,6 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
         printf(p"TLbundle IO version. \n")
     }
     
-    val probeACE2 = InputGenerator.io
-//    when (counter <= 200.U) {
-//        printf(p"This is counter $counter \n")
-//        printf(p"The inside generated input is = $probeACE2 \n")
-//        printf(p"The output to the PCIE = ${Hexadecimal(outgoingPCISdat.io.enq.bits)} \n")
-//    }
-
     // The decoder
     val ACEdecoder = Module(new ACEBigTokenDecoder(tlparams))
     ACEdecoder.io.in <> incomingPCISdat.io.deq
@@ -235,16 +252,16 @@ class SimpleNICBridgeModule(implicit p: Parameters) extends BridgeModule[HostPor
     val ACE_decode_out = ACEdecoder.io.out
 
     when (ACEdecoder.io.out.bits.Avalid || ACEdecoder.io.out.bits.Cvalid || ACEdecoder.io.out.bits.Evalid) {
-        printf(p"At counter $counter, the decoder output: $ACE_decode_out \n")
-        when (ACEdecoder.io.out.valid && (ACEdecoder.io.out.bits.isACE =/= 1.U)) {
-            printf(p"Error, wrong token here \n")
+        when (ACEdecoder.io.out.valid && (ACEdecoder.io.out.bits.isACE === 1.U)) {
+            printf(p"At simulation counter $hardware_counter or real time counter $counter, the decoder output: $ACE_decode_out \n")
         }
     }
 
     // In the version that only the hardware is changed, all incoming data is always 0
-    // val incomingv = incomingPCISdat.io.deq
-    // printf(p"at counter $counter, the incoming value from the PCIe is $incomingv \n")
-
+    val incomingv = incomingPCISdat.io.deq
+    when (incomingPCISdat.io.deq.valid) {
+        printf(p"At simulation counter $hardware_counter or real time counter $counter, the incoming value from the PCIe is ${Hexadecimal(incomingPCISdat.io.deq.bits)} \n")
+    }
 
     // Use this next line when do atual software driver tests
     val hardware_testing = false;

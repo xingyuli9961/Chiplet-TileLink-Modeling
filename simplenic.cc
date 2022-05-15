@@ -80,31 +80,35 @@ simplenic_t::simplenic_t(simif_t *sim, std::vector<std::string> &args,
     assert(this->LINKLATENCY>0);
     printf("Linklatency is %d\n", this->LINKLATENCY);
     
-    int shmemfd;
+
     char name[257];
+    int shmemfd;
     assert(shmemportname != NULL);
-    for(int i = 0; i < 2; i++) {
+    for (int j = 0; j < 2; j++) {
         printf("Using non-slot-id associated shmemportname:\n");
-        sprintf(name, "/port_nts%s_%d", shmemportname, i);
-          
-        printf("opening shmem region\n%s\n", name);
-        shmemfd = shm_open(name, O_RDWR|O_CREAT, S_IRWXU);
+        sprintf(name, "/port_nts%s_%d", shmemportname, j);
+
+        printf("opening/creating shmem region\n%s\n", name);
+        shmemfd = shm_open(name, O_RDWR | O_CREAT , S_IRWXU);
         ftruncate(shmemfd, BUFBYTES+EXTRABYTES);
-        printf("Size of pcis_read_bufs: %d\n", BUFBYTES+EXTRABYTES);
-        pcis_read_bufs[i] = (char *) mmap(NULL, BUFBYTES+EXTRABYTES, PROT_READ | PROT_WRITE, MAP_SHARED, shmemfd, 0);//remember to initialize in the write direction as well later
-    
+        pcis_read_bufs[j] = (char*)mmap(NULL, BUFBYTES+EXTRABYTES, PROT_READ | PROT_WRITE, MAP_SHARED, shmemfd, 0);
+
         printf("Using non-slot-id associated shmemportname:\n");
-        sprintf(name, "/port_stn%s_%d", shmemportname, i);
-        shmemfd = shm_open(name, O_RDWR | O_CREAT, S_IRWXU);
+        sprintf(name, "/port_stn%s_%d", shmemportname, j);
+
+        printf("opening/creating shmem region\n%s\n", name);
+        shmemfd = shm_open(name, O_RDWR | O_CREAT , S_IRWXU);
         ftruncate(shmemfd, BUFBYTES+EXTRABYTES);
-        pcis_write_bufs[i] = (char*)mmap(NULL, BUFBYTES+EXTRABYTES, PROT_READ | PROT_WRITE, MAP_SHARED, shmemfd, 0);   
+        pcis_write_bufs[j] = (char*)mmap(NULL, BUFBYTES+EXTRABYTES, PROT_READ | PROT_WRITE, MAP_SHARED, shmemfd, 0);
     }
+
     printf("successful init\n");
 }
 
 simplenic_t::~simplenic_t() {
     for (int i = 0; i < 2; i++) {
         munmap(pcis_read_bufs[i], BUFBYTES+EXTRABYTES);
+        munmap(pcis_write_bufs[i], BUFBYTES+EXTRABYTES);
     }
     free(this->mmio_addrs);
 }
@@ -114,10 +118,10 @@ simplenic_t::~simplenic_t() {
 void simplenic_t::init() {
     uint32_t output_tokens_available = read(mmio_addrs->outgoing_count);
     uint32_t input_token_capacity = SIMLATENCY_BT - read(mmio_addrs->incoming_count);
-    /*if ((input_token_capacity != SIMLATENCY_BT) || (output_tokens_available != 0)) {
-        printf("FAIL. INCORRECT TOKENS ON BOOT. produced tokens available %d, input slots available %d\n", output_tokens_available, input_token_capacity);
-        exit(1);
-    }*/
+//    if ((input_token_capacity != SIMLATENCY_BT) || (output_tokens_available != 0)) {
+//        printf("FAIL. INCORRECT TOKENS ON BOOT. produced tokens available %d, input slots available %d\n", output_tokens_available, input_token_capacity);
+//        exit(1);
+//    }
 
     printf("On init, %d token slots available on input.\n", input_token_capacity);
     uint32_t token_bytes_produced = 0;
@@ -162,13 +166,15 @@ void simplenic_t::tick() {
             token_bytes_obtained_from_fpga = pull(
                 dma_addr,
                 pcis_read_bufs[currentround],
-                BUFWIDTH * tokens_this_round);//hangs on pull call here
+                BUFWIDTH * tokens_this_round);
             printf("token bytes from fpga: %d\n",token_bytes_obtained_from_fpga);
             pcis_read_bufs[currentround][BUFBYTES] = 1;
-            for(int i = 0; i < BUFBYTES; i ++) {
-/*            printf("printing out read buffer ");
-            printf("%d\n", pcis_read_bufs[currentround][i]);
-*/
+            for(int i = 0; i < BUFBYTES; i += 64) {
+                printf("printing out read buffer: ");
+                for (int j = 0; j < 64; j++) {
+                    printf("%x ", pcis_read_bufs[currentround][i+j]);
+                }
+                printf("\n");
             }
  
             if (token_bytes_obtained_from_fpga != tokens_this_round * BUFWIDTH) {
@@ -191,9 +197,18 @@ void simplenic_t::tick() {
         uint32_t token_bytes_sent_to_fpga = 0;
         token_bytes_sent_to_fpga = push(
                 dma_addr,
-                pcis_read_bufs[currentround],
+                pcis_write_bufs[currentround],
                 BUFWIDTH * tokens_this_round);
         printf("token bytes to fpga: %d\n", token_bytes_sent_to_fpga);
+
+        for(int i = 0; i < BUFBYTES; i += 64) {
+            printf("printing out write buffer: ");
+            for (int j = 0; j < 64; j++) {
+                printf("%x ", pcis_write_bufs[currentround][i+j]);
+            }
+            printf("\n");
+        }
+
         pcis_write_bufs[currentround][BUFBYTES] = 0;
         if (token_bytes_sent_to_fpga != tokens_this_round * BUFWIDTH) {
             printf("ERR MISMATCH! on writing tokens in. actually wrote in %d bytes, wanted %d bytes.\n", token_bytes_sent_to_fpga, BUFWIDTH * tokens_this_round);

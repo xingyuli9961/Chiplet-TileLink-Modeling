@@ -85,6 +85,135 @@ uint64_t this_iter_cycles_start = 0;
 
 BasePort * ports[NUMPORTS];
 
+/* Xingyu: switch from input ports to output ports */
+void do_fast_switching_xingyu() {
+// Set up send buffs: 
+    #pragma omp parallel for
+    for (int port = 0; port < NUMPORTS; port++) {
+        ports[port]->setup_send_buf();
+    }
+
+    #pragma omp parallel for
+    for (int port = 0; port < NUMPORTS; port++) {
+        BasePort * current_port = ports[port];
+        uint8_t * input_port_buf = current_port->current_input_buf;
+        for (int tokenno = 0; tokenno < (NUM_TOKENS / 7) * 8; tokenno++) {
+            // Get a 64-bit/ 8-byte value
+            uint64_t flit = *(((uint64_t*)input_port_buf) + tokenno);
+            // fprintf(stdout, "flit code: %x \n", flit);
+            switchpacket * sp;
+            if (!(current_port->input_in_progress)) {
+                
+                sp = (switchpacket*)calloc(sizeof(switchpacket), 1);
+                current_port->input_in_progress = sp;
+
+                // here is where we inject switching latency. this is min port-to-port latency
+                sp->timestamp = this_iter_cycles_start + tokenno/8 + SWITCHLATENCY;
+                sp->sender = port;
+            }
+            sp = current_port->input_in_progress;
+            sp->dat[sp->amtwritten++] = flit;
+
+            // Completing this switch packet
+            if (sp->amtwritten >= 8 || tokenno == ((NUM_TOKENS / 7) * 8 - 1) ) {
+                current_port->input_in_progress = NULL;
+                current_port->inputqueue.push(sp);
+                fprintf(stdout, "A new switch packet from port %d: ", port);
+                for (int j = 0; j < sp->amtwritten; j++) {
+                    fprintf(stdout, "%x ", sp->dat[j]);
+                }
+                fprintf(stdout, "\n");
+                // fprintf(stdout, "packet timestamp: %ld, len: %ld, sender: %d\n", this_iter_cycles_start + (tokenno - 7) / 8, sp->amtwritten, port);
+            }
+        }
+    }
+
+    fprintf(stdout, "The size of port 0 input queue is %d \n", ports[0]->inputqueue.size());
+    fprintf(stdout, "The size of port 1 input queue is %d \n", ports[1]->inputqueue.size());
+
+    // next do the switching. but this switching is just shuffling pointers,
+    // so it should be fast. it has to be serial though...
+
+    // NO PARALLEL!
+    // shift pointers to output queues, but in order. basically.
+    // until the input queues have no more complete packets
+    // 1) find the next switchpacket with the lowest timestamp across all the inputports
+    // 2) look at its mac, copy it into the right ports
+    //     i) if it's a broadcast: sorry, you have to make N-1 copies of it...
+    //     to put into the other queues
+
+    struct tspacket {
+        uint64_t timestamp;
+        switchpacket * switchpack;
+
+        bool operator<(const tspacket &o) const
+        {
+            return timestamp > o.timestamp;
+        }
+    };
+    typedef struct tspacket tspacket;
+
+    std::priority_queue<tspacket> pqueue; 
+
+    fprintf(stdout, "starting switching\n");
+
+    for (int i = 0; i < NUMPORTS; i++) {
+        while (!(ports[i]->inputqueue.empty())) {
+            switchpacket * sp = ports[i]->inputqueue.front();
+            ports[i]->inputqueue.pop();
+            pqueue.push( tspacket { sp->timestamp, sp });
+        }
+    }
+
+    fprintf(stdout, "The size of input priority queue is %d \n", pqueue.size());
+
+    // next, put back into individual output queues
+    while (!pqueue.empty()) {
+        switchpacket * tsp = pqueue.top().switchpack;
+        pqueue.pop();
+        uint16_t send_to_port = 1 - tsp->sender;
+        ports[send_to_port]->outputqueue.push(tsp);
+        // fprintf(stdout, "At timestamps %d, %d packets are sent from port %d to port %d \n", tsp->timestamp, tsp->amtwritten, tsp->sender, send_to_port);
+    }
+
+    fprintf(stdout, "The size of port 0 output queue is %d \n", ports[0]->outputqueue.size());
+    fprintf(stdout, "The size of port 1 output queue is %d \n", ports[1]->outputqueue.size());
+
+    // finally in parallel, flush whatever we can to the output queues based on timestamp
+    #pragma omp parallel for
+    for (int port = 0; port < NUMPORTS; port++) {
+        BasePort * thisport = ports[port];         
+
+        // Initialize constraints variables
+        uint64_t flitswritten = 0;
+        bool empty_buf = true;
+
+        fprintf(stdout, "Start printing output queue port %d\n", port);
+
+        while (!(thisport->outputqueue.empty())) {
+            switchpacket *thispacket = thisport->outputqueue.front();
+            fprintf(stdout, "Inserting a new packet: ");
+            for (int i = 0; i < thispacket->amtwritten; i++) {
+                empty_buf = false;
+                *(((uint64_t*)thisport->current_output_buf) + flitswritten) = thispacket->dat[i];
+                flitswritten += 1;
+                fprintf(stdout, "%x ", thispacket->dat[i]);
+            }
+            fprintf(stdout, "\n");
+            thisport->outputqueue.pop();
+            free(thispacket); 
+        }
+        fprintf(stdout, "flits written in port %d is %d \n", port, flitswritten);
+        if (empty_buf) {
+            ((uint64_t*)thisport->current_output_buf)[0] = 0xDEADBEEFDEADBEEFL;
+        }
+    }
+}
+
+
+
+
+
 /* switch from input ports to output ports */
 void do_fast_switching() {
 #pragma omp parallel for
@@ -99,11 +228,11 @@ for (int port = 0; port < NUMPORTS; port++) {
     BasePort * current_port = ports[port];
     uint8_t * input_port_buf = current_port->current_input_buf;
     fprintf(stdout, "Working on Port %d\n", port);
-    for (int tokenno = 0; tokenno < NUM_TOKENS; tokenno++) {
+    for (int tokenno = 0; tokenno < NUM_TOKENS / 7 * 8; tokenno++) {
         //fprintf(stdout, "is there a valid flit: %d\n", is_valid_flit(input_port_buf, tokenno));
-        if (is_valid_flit(input_port_buf, tokenno)) {
+        if (true || is_valid_flit(input_port_buf, tokenno)) {
             uint64_t flit = get_flit(input_port_buf, tokenno);
-            //fprintf(stdout, "flit code: %d\n", flit);
+            // fprintf(stdout, "flit code: %d\n", flit);
             switchpacket * sp;
             if (!(current_port->input_in_progress)) {
                 sp = (switchpacket*)calloc(sizeof(switchpacket), 1);
@@ -116,8 +245,10 @@ for (int port = 0; port < NUMPORTS; port++) {
             sp = current_port->input_in_progress;
 
             sp->dat[sp->amtwritten++] = flit;
-            if (is_last_flit(input_port_buf, tokenno)) {
+            if (true || (tokenno % 8 == 7) || is_last_flit(input_port_buf, tokenno)) {
                 current_port->input_in_progress = NULL;
+                fprintf(stdout, "A switch packet is processed\n");
+                fprintf(stdout, "packet timestamp: %ld, len: %ld, sender: %d\n", this_iter_cycles_start + tokenno, sp->amtwritten, port);
                 if (current_port->push_input(sp)) {
                     printf("packet timestamp: %ld, len: %ld, sender: %d\n",
                             this_iter_cycles_start + tokenno,
@@ -237,14 +368,15 @@ int main (int argc, char *argv[]) {
     fprintf(stdout, "Using link latency: %d\n", LINKLATENCY);
     fprintf(stdout, "Using switching latency: %d\n", SWITCHLATENCY);
     fprintf(stdout, "BW throttle set to %d/%d\n", throttle_numer, throttle_denom);
-    fprintf(stdout, "Number of ports: %d", NUMPORTS);
+    fprintf(stdout, "Number of ports: %d\n", NUMPORTS);
     if ((LINKLATENCY % 7) != 0) {
         // if invalid link latency, error out.
         fprintf(stdout, "INVALID LINKLATENCY. Currently must be multiple of 7 cycles.\n");
         exit(1);
     }
 
-    omp_set_num_threads(NUMPORTS); // we parallelize over ports, so max threads = # ports
+//    omp_set_num_threads(NUMPORTS); // we parallelize over ports, so max threads = # ports
+    omp_set_num_threads(1);
 
 #define PORTSETUPCONFIG
 #include "switchconfig.h"
@@ -270,9 +402,10 @@ int main (int argc, char *argv[]) {
         }
         
         fprintf(stdout, "Entering fast switching\n");
-        do_fast_switching();
+//        do_fast_switching();
+        do_fast_switching_xingyu();
 
-        this_iter_cycles_start += LINKLATENCY; // keep track of time
+        this_iter_cycles_start += LINKLATENCY / 7; // keep track of time
         fprintf(stdout, "Cycles: %d\n", this_iter_cycles_start);
         // some ports need to handle extra stuff after each iteration
         // e.g. shmem ports swapping shared buffers
